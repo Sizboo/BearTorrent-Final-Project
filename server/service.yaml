@@ -1,0 +1,9 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: helpful-serf-server
+spec:
+  template:
+    spec:
+      containers:
+        - image: gcr.io/peerless-bond-456618-r8/server_image:latest
