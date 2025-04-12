@@ -6,9 +6,11 @@ edition = "2021"
 [dependencies]
 prost = "0.13.5"
 tonic = "0.13.0"
-tokio = { version = "1.19.2", features = ["macros", "rt-multi-thread"] }
-warp = "0.3.7"
+tokio = { version = "1.19.2", features = ["full"] }
 
+# this is only for stubbed out main before we actually build server
+warp = "0.3.7"
+tonic-build = "0.13.0"
 
 [build-dependencies]
 tonic-build = "0.13.0"
