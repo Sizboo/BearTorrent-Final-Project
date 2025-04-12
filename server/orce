@@ -1,0 +1,12 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: server
+build:
+  artifacts:
+    - image: gcr.io/peerless-bond-456618-r8/server_image
+      docker:
+        dockerfile: Dockerfile
+manifests:
+  rawYaml:
+    - service.yaml

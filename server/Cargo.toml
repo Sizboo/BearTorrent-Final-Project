@@ -7,6 +7,7 @@ edition = "2021"
 prost = "0.13.5"
 tonic = "0.13.0"
 tokio = { version = "1.19.2", features = ["macros", "rt-multi-thread"] }
+warp = "0.3.7"
 
 
 [build-dependencies]
