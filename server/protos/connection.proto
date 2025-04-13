@@ -1,0 +1,12 @@
+syntax = "proto3";
+package connection;
+
+service Connector {
+    rpc SendData (ConnReq) returns (ConnReq);
+}
+
+message ConnReq {
+    uint32 ipaddr = 1;
+    uint32 port = 2;
+    string info = 3;
+}
