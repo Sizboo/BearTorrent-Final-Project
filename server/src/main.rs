@@ -14,6 +14,7 @@
 //
 // }
 
+use std::env;
 use tonic::{transport::Server, Request, Response, Status};
 use connection::{ConnReq, connector_server::{Connector, ConnectorServer}};
 pub mod connection {
@@ -37,12 +38,17 @@ impl Connector for ConnectionService {
 }
 
 
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let address = "[::1]:8080".parse()?;
+    let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let address = format!("0.0.0.0:{}", port).parse()?;
     let connection_service = ConnectionService::default();
 
-    Server::builder().add_service(ConnectorServer::new(connection_service)).serve(address).await?;
+    Server::builder()
+        .add_service(ConnectorServer::new(connection_service))
+        .serve(address)
+        .await?;
 
     Ok(())
 }

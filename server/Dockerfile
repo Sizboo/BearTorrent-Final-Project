@@ -5,8 +5,6 @@ RUN apt-get update && apt-get install -y protobuf-compiler cmake pkg-config libs
 WORKDIR /server_image
 COPY . .
 
-RUN mkdir -p ../protos && cp -r ../protos ../protos
-
 RUN cargo build --release
 
 EXPOSE 8080
