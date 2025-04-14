@@ -1,0 +1,5 @@
+Log streaming:
+gcloud beta run services logs tail helpful-serf-server \
+  --project=peerless-bond-456618-r8 \
+  --region=us-south1 \
+  --verbosity=debug
