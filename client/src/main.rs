@@ -8,7 +8,7 @@ pub mod connection {
     tonic::include_proto!("connection");
 }
 
-const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426297.us-south1.run.app";
+const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,10 +21,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
         .connect().await?;
 
-    let mut torrent_client = TorrentClient::new(endpoint);
+    let torrent_client = TorrentClient::new(endpoint);
 
-    torrent_client.send_data().await?;
+    let _ = torrent_client.seeding().await?;
+    
+    
 
-   Ok(()) 
+Ok(())
 
 }
