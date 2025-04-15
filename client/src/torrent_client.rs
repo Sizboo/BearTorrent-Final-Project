@@ -11,7 +11,7 @@ pub struct TorrentClient {
 }
 
 impl TorrentClient {
-    
+
     pub fn new(channel: Channel) -> Self {
         TorrentClient {
             client: ConnectorClient::new(channel)
@@ -19,7 +19,7 @@ impl TorrentClient {
     }
 
     ///init is used to initialize and maintain a connection to the torrent server
-    /// init MUST be called 
+    /// init MUST be called
     /// it will need to initialize a connection and send a periodic announcement so server knows it is an available seeder
     pub async fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
 
@@ -34,11 +34,10 @@ impl TorrentClient {
     /// it will need to try UDP hole punching with the given parameter
     /// then send data
     pub async fn send_data(self) -> Result<(), Box<dyn std::error::Error>> {
-        
         let mut client = self.client.clone();
-        
-        
-        
+
+       //todo actual send logic
+
         let request = tonic::Request::new(ConnReq {
             ipaddr: 1234,
             port: 111,
@@ -47,23 +46,46 @@ impl TorrentClient {
 
         let response = client.send_data(request).await?.into_inner();
         println!("{:?}", response);
-        
+
         Ok(())
     }
-    
+
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
-    pub async fn seeding(self) -> Result<(), Box<dyn std::error::Error>> { 
-        let client = self.client.clone(); 
+    pub async fn seeding(self) -> Result<(), Box<dyn std::error::Error>> {
+        let client = self.client.clone();
         //todo loop through client.get_peer() invocation
-        
+
         let handle = tokio::spawn(async move {
             //todo: provide error checking and fail safe default
             let _ = self.send_data().await;
         });
-        
+
         handle.await?;
-        
+
+        Ok(())
+    }
+
+    ///request is a method used to request necessary connection details from the server
+    pub async fn request(self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    ///download is a process used to retrieve data from a peer
+    /// parameters:
+    /// peer ip and port
+    ///
+    /// download will initiate UDP hole punching from receiving end
+    ///  then receive data
+    pub async fn download(self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+
+    /// announce is a method used update server with connection details
+    /// this will primarily be used by init() and called on a periodic basis
+    /// this is essentially a "keep alive" method
+    pub async fn announce(self) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
