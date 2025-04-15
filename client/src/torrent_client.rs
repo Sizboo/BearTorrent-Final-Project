@@ -54,7 +54,7 @@ impl TorrentClient {
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
     pub async fn seeding(self) -> Result<(), Box<dyn std::error::Error>> { 
-        
+        let client = self.client.clone(); 
         //todo loop through client.get_peer() invocation
         
         let handle = tokio::spawn(async move {
