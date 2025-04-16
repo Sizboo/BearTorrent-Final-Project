@@ -1,11 +1,15 @@
+mod torrent_client;
+
+use torrent_client::TorrentClient;
+
 use tonic::transport::{Channel, ClientTlsConfig};
-use connection::{ConnReq, connector_client::ConnectorClient};
+
 
 pub mod connection {
     tonic::include_proto!("connection");
 }
 
-const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app";
+const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,17 +23,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
         .connect().await?;
 
-    let mut client = ConnectorClient::new(endpoint);
+    let torrent_client = TorrentClient::new(endpoint);
 
-    let request = tonic::Request::new(ConnReq {
-        ipaddr: 1234,
-        port: 111,
-        info: "lots of cool info".to_string(),
-    });
+    let _ = torrent_client.seeding().await?;
     
-    let response = client.send_data(request).await?.into_inner();
-    println!("{:?}", response);
 
-   Ok(()) 
+    
+
+Ok(())
 
 }
