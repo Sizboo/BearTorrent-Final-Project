@@ -1,12 +1,34 @@
+//syntax = "proto3";
+//package connection;
+//
+//service Connector {
+//    rpc SendData (ConnReq) returns (ConnReq);
+//}
+//
+//message ConnReq {
+//    uint32 ipaddr = 1;
+//    uint32 port = 2;
+//    string info = 3;
+//}
+
 syntax = "proto3";
 package connection;
 
 service Connector {
-    rpc SendData (ConnReq) returns (ConnReq);
+    rpc send_file_request (FileRequest) returns (PeerList);
+    rpc get_peer (PeerId) returns (PeerId);
 }
 
-message ConnReq {
+message PeerId {
     uint32 ipaddr = 1;
     uint32 port = 2;
-    string info = 3;
+}
+
+message FileRequest {
+    PeerId id = 1;
+    bytes info_hash = 2;
+}
+
+message PeerList {
+    repeated PeerId list = 1;
 }

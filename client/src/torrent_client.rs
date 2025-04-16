@@ -1,5 +1,6 @@
 use tonic::transport::{Channel};
-use connection::{ConnReq, connector_client::ConnectorClient};
+use connection::{PeerId, connector_client::ConnectorClient};
+use crate::connection::FileRequest;
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -38,13 +39,15 @@ impl TorrentClient {
 
        //todo actual send logic
 
-        let request = tonic::Request::new(ConnReq {
-            ipaddr: 1234,
-            port: 111,
-            info: "lots of cool info".to_string(),
+        let request = tonic::Request::new(connection::FileRequest {
+            id: Some(connection::PeerId {
+                ipaddr: 1234,
+                port: 8080,
+            }),
+            info_hash: Vec::from("12345"),
         });
 
-        let response = client.send_data(request).await?.into_inner();
+        let response = client.send_file_request(request).await?.into_inner();
         println!("{:?}", response);
 
         Ok(())
@@ -53,17 +56,26 @@ impl TorrentClient {
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
     pub async fn seeding(self) -> Result<(), Box<dyn std::error::Error>> {
-        let client = self.client.clone();
-        //todo loop through client.get_peer() invocation
+        let mut client = self.client.clone();
+        
+        loop {
+            // calls get_peer
+            let response = client.get_peer(PeerId {ipaddr: 1234, port:5678}).await;
 
-        let handle = tokio::spawn(async move {
-            //todo: provide error checking and fail safe default
-            let _ = self.send_data().await;
-        });
-
-        handle.await?;
-
-        Ok(())
+            // waits for response from get_peer
+            match response {
+                Ok(res) => {
+                    let peer_id = res.into_inner();
+                    
+                    tokio::spawn(async move {
+                        // TODO spawn send_data process here
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Failed to get peer: {:?}", e);
+                }
+            }
+        }
     }
 
     ///request is a method used to request necessary connection details from the server
