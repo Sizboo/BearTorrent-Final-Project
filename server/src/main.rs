@@ -55,24 +55,24 @@ impl Connector for ConnectionService {
     /// the server will send a PeerId to a seeding client for them to start streaming data
     async fn get_peer(
         &self,
-        request: Request<FileMessage>,
+        request: Request<PeerId>,
     ) -> Result<Response<PeerId>, Status> {
         let r = request.into_inner();
-
-        let peer_id = match r.id {
-            Some(id) => id,
-            None => return Err(Status::invalid_argument("PeerId missing")),
-        };
+        
+        let ipaddr = r.ipaddr;
+        let port = r.port;
 
         let (tx, mut rx) = mpsc::channel(1);
 
         let mut tracker = self.tracker.lock().await;
         tracker.entry(r.info_hash).or_default().push(Seeder {
-            peer: peer_id.clone(),
+            peer: PeerId {
+                ipaddr,
+                port,
+            },
             notify: tx,
         });
         drop(tracker);
-
 
         match rx.recv().await {
             Some(peer) => {

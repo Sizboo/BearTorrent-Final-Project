@@ -1,6 +1,6 @@
 use tonic::transport::{Channel};
 use connection::{PeerId, connector_client::ConnectorClient};
-use crate::connection::FileRequest;
+use crate::connection::FileMessage;
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -39,12 +39,12 @@ impl TorrentClient {
 
        //todo actual send logic
 
-        let request = tonic::Request::new(connection::FileRequest {
+        let request = tonic::Request::new(connection::FileMessage {
             id: Some(connection::PeerId {
                 ipaddr: 1234,
                 port: 8080,
             }),
-            info_hash: Vec::from("12345"),
+            info_hash: 12345,
         });
 
         let response = client.send_file_request(request).await?.into_inner();
