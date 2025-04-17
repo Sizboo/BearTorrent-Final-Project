@@ -1,3 +1,4 @@
+use tonic::Request;
 use tonic::transport::{Channel};
 use connection::{PeerId, connector_client::ConnectorClient};
 use crate::connection::FileMessage;
@@ -55,21 +56,23 @@ impl TorrentClient {
 
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
-    pub async fn seeding(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn seeding(self, self_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
         
         loop {
             // calls get_peer
-            let response = client.get_peer(PeerId {ipaddr: 1234, port:5678}).await;
+            let response = client.get_peer(self_id).await;
 
             // waits for response from get_peer
             match response {
                 Ok(res) => {
                     let peer_id = res.into_inner();
                     
-                    tokio::spawn(async move {
-                        // TODO spawn send_data process here
-                    });
+                    println!("peer seeding: {:?}", peer_id);
+                    
+                    // tokio::spawn(async move {
+                    //     // TODO spawn send_data process here
+                    // });
                 }
                 Err(e) => {
                     eprintln!("Failed to get peer: {:?}", e);
@@ -79,8 +82,18 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn request(self) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
+    pub async fn file_request(self, self_id: PeerId, file_hash: u32) -> Result<connection::PeerList, Box<dyn std::error::Error>> {
+        let mut client = self.client.clone();
+        
+        
+        let request = Request::new(connection::FileMessage {
+            id: Some(self_id),
+            info_hash: file_hash,
+        });
+        
+        let resp = client.send_file_request(request).await?;
+        
+        Ok(resp.into_inner())
     }
 
     ///download is a process used to retrieve data from a peer
@@ -99,6 +112,20 @@ impl TorrentClient {
     /// this is essentially a "keep alive" method
     pub async fn announce(self) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
+    }
+    
+    pub async fn advertise(self, self_id: PeerId) -> Result<PeerId, Box<dyn std::error::Error>> {
+        let mut client = self.client.clone();
+        
+
+        let request = Request::new(connection::FileMessage {
+            id: Some(self_id),
+            info_hash: 12345,
+        });
+        
+        let resp = client.advertise(request).await?;
+        
+        Ok(resp.into_inner())
     }
 
 }

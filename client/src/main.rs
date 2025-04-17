@@ -23,8 +23,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let torrent_client = TorrentClient::new(endpoint);
     
-    let _ = torrent_client.seeding().await?;
-    
     
 
 Ok(())
