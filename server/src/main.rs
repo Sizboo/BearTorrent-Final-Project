@@ -34,15 +34,17 @@ impl Connector for ConnectionService {
         let r = request.into_inner();
         let requester = r.clone().id.unwrap_or(PeerId { ipaddr: 0, port: 0 });
 
-        let mut tracker = self.file_tracker.lock().await;
+        let mut file_tracker = self.file_tracker.lock().await;
 
         // notify all seeders of the file
-        if let Some(seeders) = tracker.get_mut(&r.info_hash) {
+        if let Some(seeders) = file_tracker.get_mut(&r.info_hash) {
+            //todo implement this so that it selects specific peers (or pieces out file)
             for seeder in seeders.iter_mut() {
-                seeder.notify.send(requester.clone()).await;
+                let _ = seeder.notify.send(requester.clone()).await;
             }
 
             // returns a list of all peers that have a file
+            //todo this needs to send THE seeder/s that are sharing for hole punching, not necessarily everyone with file
             let peer_list = seeders.iter().map(|s| s.peer.clone()).collect();
             Ok(Response::new(PeerList { list: peer_list }))
         } else {
@@ -51,14 +53,20 @@ impl Connector for ConnectionService {
         }
     }
 
+    ///this function is used by clients willing to share data to get peers who request data.
+    /// clients should listen to this service at all times they are willing to send.
+    //todo consider renaming
     async fn get_peer(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
         let peer_id = request.into_inner();
+        
+        //todo if we implement states (offline, sharing) should first update its state on server to sharing
+        // any time in offline status it will not be selected
 
 
-        match self.send_tracker.lock().await.get(&peer_id) {
+        match self.send_tracker.lock().await.get_mut(&peer_id) {
             Some(recv) => {
-                let peer_id = recv.recv().await?;
-                Ok
+                let peer_id = recv.recv().await.ok_or(Status::new(Code::Internal, "peer id not returned upon signal from server"))?;
+                Ok(Response::new(peer_id))
             }
             None => Err(Status::internal("dropped")),
         }
@@ -66,8 +74,7 @@ impl Connector for ConnectionService {
 
     }
 
-    /// this function is used to get a peer when the seeding process is listening,
-    /// the server will send a PeerId to a seeding client for them to start streaming data
+    /// this function is used to advertise a client owns a file that can be shared 
     async fn advertise(
         &self,
         request: Request<FileMessage>,
@@ -79,7 +86,7 @@ impl Connector for ConnectionService {
             None => return Err(Status::invalid_argument("PeerId missing")),
         };
 
-        let (tx, mut rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::channel(1);
 
         let mut file_tracker = self.file_tracker.lock().await;
         file_tracker.entry(r.info_hash).or_default().push(Seeder {

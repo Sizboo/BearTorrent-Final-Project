@@ -37,18 +37,18 @@ impl TorrentClient {
     pub async fn send_data(self) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
-       //todo actual send logic
+       //todo actual send logic to other peer
 
-        let request = tonic::Request::new(connection::FileMessage {
-            id: Some(connection::PeerId {
-                ipaddr: 1234,
-                port: 8080,
-            }),
-            info_hash: 12345,
-        });
-
-        let response = client.send_file_request(request).await?.into_inner();
-        println!("{:?}", response);
+        // let request = tonic::Request::new(connection::FileMessage {
+        //     id: Some(connection::PeerId {
+        //         ipaddr: 1234,
+        //         port: 8080,
+        //     }),
+        //     info_hash: 12345,
+        // });
+        // 
+        // let response = client.send_file_request(request).await?.into_inner();
+        // println!("{:?}", response);
 
         Ok(())
     }
