@@ -18,7 +18,8 @@ struct Seeder {
 
 #[derive(Debug, Default)]
 pub struct ConnectionService {
-    pub tracker: Arc<Mutex<HashMap<u32, Vec<Seeder>>>>,
+    file_tracker: Arc<Mutex<HashMap<u32, Vec<Seeder>>>>,
+    send_tracker: Arc<Mutex<HashMap<PeerId, mpsc::Receiver<PeerId>>>>,
 }
 
 #[tonic::async_trait]
@@ -33,7 +34,7 @@ impl Connector for ConnectionService {
         let r = request.into_inner();
         let requester = r.clone().id.unwrap_or(PeerId { ipaddr: 0, port: 0 });
 
-        let mut tracker = self.tracker.lock().await;
+        let mut tracker = self.file_tracker.lock().await;
 
         // notify all seeders of the file
         if let Some(seeders) = tracker.get_mut(&r.info_hash) {
@@ -50,29 +51,34 @@ impl Connector for ConnectionService {
         }
     }
 
-
     /// this function is used to get a peer when the seeding process is listening,
     /// the server will send a PeerId to a seeding client for them to start streaming data
-    async fn get_peer(
+    async fn advertise(
         &self,
-        request: Request<PeerId>,
+        request: Request<FileMessage>,
     ) -> Result<Response<PeerId>, Status> {
         let r = request.into_inner();
-        
-        let ipaddr = r.ipaddr;
-        let port = r.port;
+
+        let peer_id = match r.id {
+            Some(id) => id,
+            None => return Err(Status::invalid_argument("PeerId missing")),
+        };
 
         let (tx, mut rx) = mpsc::channel(1);
 
-        let mut tracker = self.tracker.lock().await;
-        tracker.entry(r.info_hash).or_default().push(Seeder {
-            peer: PeerId {
-                ipaddr,
-                port,
-            },
+        let mut file_tracker = self.file_tracker.lock().await;
+        file_tracker.entry(r.info_hash).or_default().push(Seeder {
+            peer: peer_id.clone(),
             notify: tx,
         });
-        drop(tracker);
+
+        let mut send_tracker = self.send_tracker.lock().await;
+        send_tracker.insert(peer_id, rx);
+
+        Ok( peer_id )
+    }
+
+    async fn get_peer(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
 
         match rx.recv().await {
             Some(peer) => {
@@ -80,7 +86,10 @@ impl Connector for ConnectionService {
             }
             None => Err(Status::internal("dropped")),
         }
+
+
     }
+
 }
 
 
