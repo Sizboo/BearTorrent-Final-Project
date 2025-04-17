@@ -15,8 +15,8 @@ syntax = "proto3";
 package connection;
 
 service Connector {
-    rpc send_file_request (FileMessage) returns (PeerList);
-    rpc get_peer (FileMessage) returns (PeerId);
+    rpc send_file_request (FileRequest) returns (PeerList);
+    rpc get_peer (PeerId) returns (PeerId);
 }
 
 message PeerId {
@@ -24,9 +24,9 @@ message PeerId {
     uint32 port = 2;
 }
 
-message FileMessage {
+message FileRequest {
     PeerId id = 1;
-    uint32 info_hash = 2;
+    bytes info_hash = 2;
 }
 
 message PeerList {
