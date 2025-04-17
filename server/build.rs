@@ -1,7 +1,6 @@
-use std::path::Path;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main () -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
-        .compile_protos(&["./protos/connection.proto"], &["./protos"])?;
+        .type_attribute("connection.PeerId", "#[derive(Hash, Eq)]")
+        .compile_protos(&["protos/connection.proto"], &["protos"])?;
     Ok(())
 }

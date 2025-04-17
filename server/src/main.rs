@@ -1,6 +1,6 @@
 use std::env;
 use std::collections::HashMap;
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -39,7 +39,7 @@ impl Connector for ConnectionService {
         // notify all seeders of the file
         if let Some(seeders) = tracker.get_mut(&r.info_hash) {
             for seeder in seeders.iter_mut() {
-                let temp = seeder.notify.send(requester.clone()).await;
+                seeder.notify.send(requester.clone()).await;
             }
 
             // returns a list of all peers that have a file
@@ -49,6 +49,21 @@ impl Connector for ConnectionService {
             // just returns an empty list
             Ok(Response::new(PeerList { list: vec![] }))
         }
+    }
+
+    async fn get_peer(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
+        let peer_id = request.into_inner();
+
+
+        match self.send_tracker.lock().await.get(&peer_id) {
+            Some(recv) => {
+                let peer_id = recv.recv().await?;
+                Ok
+            }
+            None => Err(Status::internal("dropped")),
+        }
+
+
     }
 
     /// this function is used to get a peer when the seeding process is listening,
@@ -75,19 +90,7 @@ impl Connector for ConnectionService {
         let mut send_tracker = self.send_tracker.lock().await;
         send_tracker.insert(peer_id, rx);
 
-        Ok( peer_id )
-    }
-
-    async fn get_peer(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
-
-        match rx.recv().await {
-            Some(peer) => {
-                Ok(Response::new(peer))
-            }
-            None => Err(Status::internal("dropped")),
-        }
-
-
+        Ok( Response::new(peer_id) )
     }
 
 }
