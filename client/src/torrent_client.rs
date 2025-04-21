@@ -127,5 +127,14 @@ impl TorrentClient {
         
         Ok(resp.into_inner())
     }
+    
+    pub async fn test_ip(self) {
+        let mut client = self.client.clone();
+        
+        let resp = client.test_func(Request::new(connection::ClientId {client_id: 123})).await.unwrap();
+        
+        println!("Client Received {:?}", resp);
+        
+    }
 
 }

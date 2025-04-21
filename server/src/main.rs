@@ -1,5 +1,6 @@
 use std::env;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
 use std::sync::Arc;
@@ -59,7 +60,7 @@ impl Connector for ConnectionService {
     async fn get_peer(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
         let peer_id = request.into_inner();
         
-        //todo if we implement states (offline, sharing) should first update its state on server to sharing
+        //todo if we implement states (offline, seeding) should first update its state on server to sharing
         // any time in offline status it will not be selected
 
 
@@ -98,6 +99,30 @@ impl Connector for ConnectionService {
         send_tracker.insert(peer_id, rx);
 
         Ok( Response::new(peer_id) )
+    }
+
+    async fn test_func(
+        &self,
+        request: Request<connection::ClientId>,
+    ) -> Result<Response<PeerId>, Status> {
+        let socket_addr = request.remote_addr().ok_or(Status::internal("SocketAddr is none"));
+
+        println!("Received info from {:?}", socket_addr);
+
+        let ipaddr = socket_addr.clone()?.ip(); 
+        let port = socket_addr?.port() as u32;
+        
+        let num =  match ipaddr {
+            IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
+            IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
+        };
+
+        let peer_id = PeerId {
+            ipaddr: num.unwrap(),
+            port,
+        };
+
+        Ok ( Response::new(peer_id))
     }
 
 }
