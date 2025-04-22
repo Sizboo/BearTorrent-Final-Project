@@ -61,6 +61,7 @@ impl TorrentClient {
         let port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
 
+        println!("starting to send udp packets from {:?} to {:}", self.self_addr, peer_addr);
         for _ in 0 ..10 {
             let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
         }
@@ -98,6 +99,7 @@ impl TorrentClient {
         loop {
             // calls get_peer
             let response = client.get_peer(self_addr).await;
+            println!("response from get_peer: {:?}", response);
 
             // waits for response from get_peer
             match response {

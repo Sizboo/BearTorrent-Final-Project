@@ -58,6 +58,7 @@ impl Connector for ConnectionService {
     /// clients should listen to this service at all times they are willing to send.
     //todo consider renaming
     async fn get_peer(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
+        println!("get_peer called");
         let peer_id = request.into_inner();
         
         //todo if we implement states (offline, seeding) should first update its state on server to sharing
@@ -81,6 +82,8 @@ impl Connector for ConnectionService {
         request: Request<FileMessage>,
     ) -> Result<Response<PeerId>, Status> {
         let r = request.into_inner();
+
+        println!("advertising file: {:}", r.info_hash);
 
         let peer_id = match r.id {
             Some(id) => id,
