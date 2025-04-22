@@ -69,6 +69,8 @@ impl TorrentClient {
         
         let send_arc = Arc::clone(&self);
         
+        println!("Starting Send to peer ip: {}, port: {}", ip_addr, port);
+        
         let send_task = tokio::spawn(async move {
             for i in 0..50 {
                 print!("Send Attempt: {}", i);
