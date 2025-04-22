@@ -5,6 +5,7 @@ use tokio::net::UdpSocket as TokioUdpSocket;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
+use tokio::try_join;
 use tonic::Request;
 use tonic::transport::{Channel};
 use connection::{PeerId, connector_client::ConnectorClient};
@@ -66,16 +67,16 @@ impl TorrentClient {
         let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
-
+        
         let send_arc = Arc::clone(&self);
-
+        
         println!("Starting Send to peer ip: {}, port: {}", ip_addr, port);
-
+        
         let send_task = tokio::spawn(async move {
-            for i in 0..50 {
+            for i in 0..200 {
                 println!("Send Attempt: {}", i);
                 let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
-                sleep(Duration::from_millis(5)).await;
+                sleep(Duration::from_millis(10)).await;
             }
         });
 
@@ -93,14 +94,8 @@ impl TorrentClient {
         });
 
 
-        tokio::select! {
-            _ = send_task => {
-                println!("Send task completed");
-            }
-            _ = read_task => {
-                println!("Read task completed");
-            }
-        }
+        try_join!(send_task, read_task)?;
+
         Ok(())
     }
 
