@@ -66,11 +66,11 @@ impl TorrentClient {
         let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
-        
+
         let send_arc = Arc::clone(&self);
-        
+
         println!("Starting Send to peer ip: {}, port: {}", ip_addr, port);
-        
+
         let send_task = tokio::spawn(async move {
             for i in 0..50 {
                 println!("Send Attempt: {}", i);
@@ -78,8 +78,8 @@ impl TorrentClient {
                 sleep(Duration::from_millis(5)).await;
             }
         });
-        
-        
+
+
         let read_task = tokio::spawn( async move {
             let mut recv_buf = [0u8; 1024];
             loop {
@@ -91,8 +91,8 @@ impl TorrentClient {
                 }
             }
         });
-        
-        
+
+
         tokio::select! {
             _ = send_task => {
                 println!("Send task completed");
