@@ -22,31 +22,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
         .connect().await?;
-    
+
     let torrent_client = Arc::new(TorrentClient::new(endpoint).await?);
-    
+
     loop {
-    
+
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
         let client_arc = Arc::clone(&torrent_client);
-        
+
         let command = input.trim();
-        
+
         match command {
             "s" => {
                 println!("Seeding");
 
-                client_arc.advertise().await?; 
-                
+                client_arc.advertise().await?;
+
                 let client_arc = Arc::clone(&torrent_client);
-               
+
                 tokio::spawn( async move {
-                    client_arc.seeding().await.unwrap(); 
+                    client_arc.seeding().await.unwrap();
                 });
             }
             "r" => {
                 println!("Requesting");
+                
+                let file_hash = 12345;
+                
+                let mut peer_list = client_arc.file_request(file_hash).await?;
+                
+                client_arc.get_file_from_peer(peer_list.list.pop().unwrap()).await?;
             }
             "q" => {
                 println!("Quitting");
@@ -55,10 +61,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => {
                 println!("Unknown command: {}", command);
             }
-            
+
         }
     }
-    
+
 
 Ok(())
 

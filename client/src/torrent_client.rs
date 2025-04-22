@@ -22,7 +22,7 @@ pub struct TorrentClient {
 impl TorrentClient {
 
     pub async fn new(channel: Channel) -> Result<TorrentClient, Box<dyn std::error::Error>> {
-        
+
         //bind port and get public facing id
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
         let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
@@ -33,12 +33,12 @@ impl TorrentClient {
             IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
             IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
         }?;
-       
+
         let self_addr = PeerId {
             ipaddr,
             port: external_addr.port() as u32,
         };
-        
+
         Ok(
             TorrentClient {
                 client: ConnectorClient::new(channel),
@@ -55,7 +55,7 @@ impl TorrentClient {
 
         Ok(())
     }
-    
+
     async fn hole_punch(&self, peer_id: PeerId ) -> Result<(), Box<dyn std::error::Error>> {
         let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let port = peer_id.port as u16;
@@ -64,7 +64,7 @@ impl TorrentClient {
         for _ in 0 ..10 {
             let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
         }
-        
+
         let mut recv_buf = [0u8; 1024];
         if let Ok((n, src)) = self.socket.recv_from(&mut recv_buf).await {
             println!("Received a message from {}: {:?}", src, std::str::from_utf8(&recv_buf[..n]));
@@ -105,7 +105,7 @@ impl TorrentClient {
                     let peer_id = res.into_inner();
                     
                     println!("peer to send {:?}", peer_id);
-                    
+
                     let self_clone = Arc::clone(&self);
                     
                     tokio::spawn(async move {
@@ -133,11 +133,11 @@ impl TorrentClient {
         
         Ok(resp.into_inner())
     }
-   
+
     ///Used when client is requesting a file
     pub async fn get_file_from_peer(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
         self.hole_punch(peer_id).await?;
-        
+
         Ok(())
     }
 
@@ -159,7 +159,7 @@ impl TorrentClient {
         Ok(())
     }
     
-    pub async fn advertise(self: Arc<Self>) -> Result<PeerId, Box<dyn std::error::Error>> {
+    pub async fn advertise(&self) -> Result<PeerId, Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
         
         //todo make hash active
