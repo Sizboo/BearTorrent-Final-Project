@@ -23,7 +23,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let torrent_client = TorrentClient::new(endpoint);
 
-    torrent_client.test_ip().await;
+    let res = torrent_client.test_ip().await;
+    
+    if res.is_err() {
+        println!("{}", res.err().unwrap().to_string());
+    }
 
 Ok(())
 

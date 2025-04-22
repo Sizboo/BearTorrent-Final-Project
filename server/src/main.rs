@@ -105,21 +105,21 @@ impl Connector for ConnectionService {
         &self,
         request: Request<connection::ClientId>,
     ) -> Result<Response<PeerId>, Status> {
-        let socket_addr = request.remote_addr().ok_or(Status::internal("SocketAddr is none"));
-
-        println!("Received info from {:?}", socket_addr);
-
-        let ipaddr = socket_addr.clone()?.ip(); 
-        let port = socket_addr?.port() as u32;
+        println!("in test function");
         
-        let num =  match ipaddr {
-            IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
-            IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
-        };
+        // let socket_addr = request.remote_addr().ok_or(Status::internal("SocketAddr is none"));
+        let client_ip = request.metadata().get("x-forwarded-for").and_then(|v| v.to_str().ok());
+        
+        if let Some(ip) = client_ip {
+            println!("client ip {}", ip);
+        } else {
+            println!("Client ip not available")
+        }
+
 
         let peer_id = PeerId {
-            ipaddr: num.unwrap(),
-            port,
+            ipaddr: ip,
+            port: 1234,
         };
 
         Ok ( Response::new(peer_id))
