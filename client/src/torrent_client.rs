@@ -3,6 +3,8 @@ use stunclient::StunClient;
 use std::net::UdpSocket;
 use tokio::net::UdpSocket as TokioUdpSocket;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
 use tonic::Request;
 use tonic::transport::{Channel};
 use connection::{PeerId, connector_client::ConnectorClient};
@@ -60,24 +62,36 @@ impl TorrentClient {
         Ok(())
     }
 
-    async fn hole_punch(&self, peer_id: PeerId ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn hole_punch(self: Arc<Self>, peer_id: PeerId ) -> Result<(), Box<dyn std::error::Error>> {
         let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
-
-        let mut recv_buf = [0u8; 1024];
-        println!("starting to send udp packets from {:?} to {:}", self.self_addr, peer_addr);
-        for i in 0..100 {
-            println!("Send Attempt: {}", i);
-            let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
-            let res = self.socket.try_recv_from(&mut recv_buf);  
-            if !res.is_err() {
-                let (n, src) = res.unwrap();
-                println!("Received a message from {}: {:?}", src, std::str::from_utf8(&recv_buf[..n]));
-            }
-            
-        }
         
+        let send_arc = Arc::clone(&self);
+        
+        let send_task = tokio::spawn(async move {
+            for i in 0..50 {
+                print!("Send Attempt: {}", i);
+                let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
+                sleep(Duration::from_millis(5)).await;
+            }
+        });
+        
+        
+        let read_task = tokio::spawn( async move {
+            let mut recv_buf = [0u8; 1024];
+            loop {
+                match send_arc.socket.recv_from(&mut recv_buf).await {
+                    Ok((n, src)) => {
+                        println!("Received from {}: {:?}", src, &recv_buf[..n]);
+                    }
+                    Err(e) => eprintln!("Recv error: {}", e),
+                }
+            }
+        });
+
+        send_task.await?;
+        read_task.await?;
 
         Ok(())
     }
@@ -142,8 +156,9 @@ impl TorrentClient {
     }
 
     ///Used when client is requesting a file
-    pub async fn get_file_from_peer(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-        self.hole_punch(peer_id).await?;
+    pub async fn get_file_from_peer(self : Arc<Self>, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+        let self_arc = Arc::clone(&self);
+        self_arc.hole_punch(peer_id).await?;
 
         Ok(())
     }
