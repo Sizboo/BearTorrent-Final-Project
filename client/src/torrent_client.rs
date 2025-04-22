@@ -65,17 +65,19 @@ impl TorrentClient {
         let port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
 
-        println!("starting to send udp packets from {:?} to {:}", self.self_addr, peer_addr);
-        for _ in 0 ..10 {
-            let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
-        }
-
         let mut recv_buf = [0u8; 1024];
-        if let Ok((n, src)) = self.socket.recv_from(&mut recv_buf).await {
-            println!("Received a message from {}: {:?}", src, std::str::from_utf8(&recv_buf[..n]));
-        } else {
-            println!("No response")
+        println!("starting to send udp packets from {:?} to {:}", self.self_addr, peer_addr);
+        for i in 0..10 {
+            println!("Send Attempt: {}", i);
+            let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
+            let res = self.socket.try_recv_from(&mut recv_buf);  
+            if !res.is_err() {
+                let (n, src) = res.unwrap();
+                println!("Received a message from {}: {:?}", src, std::str::from_utf8(&recv_buf[..n]));
+            }
+            
         }
+        
 
         Ok(())
     }
