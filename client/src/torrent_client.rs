@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use stunclient::StunClient;
 use std::net::UdpSocket;
+use tokio::net::UdpSocket as TokioUdpSocket;
 use std::sync::Arc;
 use tonic::Request;
 use tonic::transport::{Channel};
@@ -14,7 +15,7 @@ pub mod connection {
 #[derive(Debug)]
 pub struct TorrentClient {
     client: ConnectorClient<Channel>,
-    socket: UdpSocket,
+    socket: TokioUdpSocket,
     self_addr: PeerId,
 }
 
@@ -41,7 +42,7 @@ impl TorrentClient {
         Ok(
             TorrentClient {
                 client: ConnectorClient::new(channel),
-                socket,
+                socket: TokioUdpSocket::from_std(socket)?,
                 self_addr,
             }
         )
@@ -61,11 +62,11 @@ impl TorrentClient {
         let peer_addr = SocketAddr::from((ip_addr, port));
 
         for _ in 0 ..10 {
-            let _ = self.socket.send_to(b"whatup dawg", peer_addr);
+            let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
         }
         
         let mut recv_buf = [0u8; 1024];
-        if let Ok((n, src)) = self.socket.recv_from(&mut recv_buf) {
+        if let Ok((n, src)) = self.socket.recv_from(&mut recv_buf).await {
             println!("Received a message from {}: {:?}", src, std::str::from_utf8(&recv_buf[..n]));
         } else {
             println!("No response")
@@ -158,7 +159,7 @@ impl TorrentClient {
         Ok(())
     }
     
-    pub async fn advertise(&self) -> Result<PeerId, Box<dyn std::error::Error>> {
+    pub async fn advertise(self: Arc<Self>) -> Result<PeerId, Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
         
         //todo make hash active

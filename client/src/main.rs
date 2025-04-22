@@ -23,12 +23,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
         .connect().await?;
     
-    let torrent_client = TorrentClient::new(endpoint).await?;
+    let torrent_client = Arc::new(TorrentClient::new(endpoint).await?);
     
     loop {
     
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
+        let client_arc = Arc::clone(&torrent_client);
         
         let command = input.trim();
         
@@ -36,9 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "s" => {
                 println!("Seeding");
 
-                torrent_client.advertise().await?; 
+                client_arc.advertise().await?; 
                 
-                let client_arc = Arc::new(torrent_client);
+                let client_arc = Arc::clone(&torrent_client);
                
                 tokio::spawn( async move {
                     client_arc.seeding().await.unwrap(); 
