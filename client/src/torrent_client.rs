@@ -73,11 +73,10 @@ impl TorrentClient {
         
         let send_task = tokio::spawn(async move {
             for i in 0..50 {
-                print!("Send Attempt: {}", i);
+                println!("Send Attempt: {}", i);
                 let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
                 sleep(Duration::from_millis(5)).await;
             }
-            sleep(Duration::from_secs(2)).await;
         });
         
         
