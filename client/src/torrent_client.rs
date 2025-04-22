@@ -1,3 +1,5 @@
+use std::net::{Ipv4Addr, SocketAddr};
+use tokio::net::UdpSocket;
 use tonic::Request;
 use tonic::transport::{Channel};
 use connection::{PeerId, connector_client::ConnectorClient};
@@ -9,14 +11,16 @@ pub mod connection {
 
 
 pub struct TorrentClient {
-    client: ConnectorClient<Channel>
+    client: ConnectorClient<Channel>,
+    socket: UdpSocket,
 }
 
 impl TorrentClient {
 
-    pub fn new(channel: Channel) -> Self {
+    pub fn new(channel: Channel, socket: UdpSocket) -> Self {
         TorrentClient {
-            client: ConnectorClient::new(channel)
+            client: ConnectorClient::new(channel),
+            socket,
         }
     }
 
@@ -24,6 +28,25 @@ impl TorrentClient {
     /// init MUST be called
     /// it will need to initialize a connection and send a periodic announcement so server knows it is an available seeder
     pub async fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+
+        Ok(())
+    }
+    
+    async fn hole_punch(&self, peer_id: PeerId ) -> Result<(), Box<dyn std::error::Error>> {
+        let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+        let port = peer_id.port as u16;
+        let peer_addr = SocketAddr::from((ip_addr, port));
+
+        for _ in 0 ..10 {
+            let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
+        }
+        
+        let mut recv_buf = [0u8; 1024];
+        if let Ok((n, src)) = self.socket.recv_from(&mut recv_buf).await {
+            println!("Received a message from {}: {:?}", src, std::str::from_utf8(&recv_buf[..n]));
+        } else {
+            println!("No response")
+        }
 
         Ok(())
     }
@@ -35,21 +58,10 @@ impl TorrentClient {
     ///
     /// it will need to try UDP hole punching with the given parameter
     /// then send data
-    pub async fn send_data(self) -> Result<(), Box<dyn std::error::Error>> {
-        let mut client = self.client.clone();
+    pub async fn send_data(self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
 
-       //todo actual send logic to other peer
-
-        // let request = tonic::Request::new(connection::FileMessage {
-        //     id: Some(connection::PeerId {
-        //         ipaddr: 1234,
-        //         port: 8080,
-        //     }),
-        //     info_hash: 12345,
-        // });
-        // 
-        // let response = client.send_file_request(request).await?.into_inner();
-        // println!("{:?}", response);
+       //todo actual send logic to other per
+        self.hole_punch(peer_id).await?;
 
         Ok(())
     }
@@ -68,11 +80,11 @@ impl TorrentClient {
                 Ok(res) => {
                     let peer_id = res.into_inner();
                     
-                    println!("peer seeding: {:?}", peer_id);
+                    println!("peer to send {:?}", peer_id);
                     
-                    // tokio::spawn(async move {
-                    //     // TODO spawn send_data process here
-                    // });
+                    tokio::spawn(async move {
+                        
+                    });
                 }
                 Err(e) => {
                     eprintln!("Failed to get peer: {:?}", e);
@@ -94,6 +106,13 @@ impl TorrentClient {
         let resp = client.send_file_request(request).await?;
         
         Ok(resp.into_inner())
+    }
+   
+    ///Used when client is requesting a file
+    pub async fn get_file_from_peer(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+        self.hole_punch(peer_id).await?;
+        
+        Ok(())
     }
 
     ///download is a process used to retrieve data from a peer
@@ -128,14 +147,5 @@ impl TorrentClient {
         Ok(resp.into_inner())
     }
     
-    pub async fn test_ip(self) -> Result<(), Box<dyn std::error::Error>> {
-        let mut client = self.client.clone();
-        
-        let resp = client.test_func(Request::new(connection::ClientId {client_id: 123})).await?;
-        
-        println!("Client Received {:?}", resp);
-       
-        Ok(())
-    }
 
 }

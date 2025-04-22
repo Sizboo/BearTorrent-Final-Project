@@ -101,29 +101,6 @@ impl Connector for ConnectionService {
         Ok( Response::new(peer_id) )
     }
 
-    async fn test_func(
-        &self,
-        request: Request<connection::ClientId>,
-    ) -> Result<Response<PeerId>, Status> {
-        println!("in test function");
-        
-        // let socket_addr = request.remote_addr().ok_or(Status::internal("SocketAddr is none"));
-        let client_ip = request.metadata().get("x-forwarded-for").and_then(|v| v.to_str().ok());
-        
-        if let Some(ip) = client_ip {
-            println!("client ip {}", ip);
-        } else {
-            println!("Client ip not available")
-        }
-
-
-        let peer_id = PeerId {
-            ipaddr: ip,
-            port: 1234,
-        };
-
-        Ok ( Response::new(peer_id))
-    }
 
 }
 

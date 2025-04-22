@@ -5,15 +5,11 @@ service Connector {
     rpc send_file_request (FileMessage) returns (PeerList);
     rpc get_peer (PeerId) returns (PeerId);
     rpc advertise (FileMessage) returns(PeerId);
-    rpc test_func (ClientId) returns (PeerId);
 }
 
-message ClientId {
-    uint32 client_id = 1;
-}
 
 message PeerId {
-    string ipaddr = 1;
+    uint32 ipaddr = 1;
     uint32 port = 2;
 }
 
