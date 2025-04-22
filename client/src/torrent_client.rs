@@ -67,7 +67,7 @@ impl TorrentClient {
 
         let mut recv_buf = [0u8; 1024];
         println!("starting to send udp packets from {:?} to {:}", self.self_addr, peer_addr);
-        for i in 0..10 {
+        for i in 0..100 {
             println!("Send Attempt: {}", i);
             let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
             let res = self.socket.try_recv_from(&mut recv_buf);  
