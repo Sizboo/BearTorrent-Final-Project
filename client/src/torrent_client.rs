@@ -77,6 +77,7 @@ impl TorrentClient {
                 let _ = self.socket.try_send_to(b"whatup dawg", peer_addr);
                 sleep(Duration::from_millis(5)).await;
             }
+            sleep(Duration::from_secs(2)).await;
         });
         
         
@@ -91,10 +92,16 @@ impl TorrentClient {
                 }
             }
         });
-
-        send_task.await?;
-        read_task.await?;
-
+        
+        
+        tokio::select! {
+            _ = send_task => {
+                println!("Send task completed");
+            }
+            _ = read_task => {
+                println!("Read task completed");
+            }
+        }
         Ok(())
     }
 
