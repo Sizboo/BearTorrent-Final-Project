@@ -33,12 +33,16 @@ impl TorrentClient {
             IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
             IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
         }?;
+        
+        println!("My public IP {}", external_addr.ip());
+        println!("My public PORT {}", external_addr.port());
 
         let self_addr = PeerId {
             ipaddr,
             port: external_addr.port() as u32,
         };
 
+        socket.set_nonblocking(true)?;
         Ok(
             TorrentClient {
                 client: ConnectorClient::new(channel),
@@ -99,7 +103,6 @@ impl TorrentClient {
         loop {
             // calls get_peer
             let response = client.get_peer(self_addr).await;
-            println!("response from get_peer: {:?}", response);
 
             // waits for response from get_peer
             match response {
