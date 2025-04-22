@@ -92,8 +92,12 @@ impl TorrentClient {
                 match send_arc.socket.recv_from(&mut recv_buf).await {
                     Ok((n, src)) => {
                         println!("Received from {}: {:?}", src, &recv_buf[..n]);
+                        break;
                     }
-                    Err(e) => eprintln!("Recv error: {}", e),
+                    Err(e) => {
+                        eprintln!("Recv error: {}", e);
+                        break;
+                    },
                 }
             }
         });
