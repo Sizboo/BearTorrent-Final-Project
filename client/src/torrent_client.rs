@@ -6,6 +6,8 @@ use std::net::UdpSocket;
 use tokio::net::UdpSocket as TokioUdpSocket;
 use std::sync::Arc;
 use std::time::Duration;
+use quinn::crypto::rustls::QuicServerConfig;
+use quinn::{Endpoint, TokioRuntime};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::time::sleep;
 use tokio::try_join;
@@ -21,7 +23,7 @@ pub mod connection {
 #[derive(Debug)]
 pub struct TorrentClient {
     client: ConnectorClient<Channel>,
-    socket: TokioUdpSocket,
+    socket: Option<TokioUdpSocket>,
     self_addr: PeerId,
 }
 
@@ -93,7 +95,7 @@ impl TorrentClient {
         let read_task = tokio::spawn( async move {
             let mut recv_buf = [0u8; 1024];
             loop {
-                match send_arc.socket.recv_from(&mut recv_buf).await {
+                match send_arc.socket.is_some().recv_from(&mut recv_buf).await {
                     Ok((n, src)) => {
                         println!("Received from {}: {:?}", src, &recv_buf[..n]);
                         if &recv_buf[..n] == punch_string {
@@ -115,7 +117,7 @@ impl TorrentClient {
         Ok(())
     }
     
-    async fn establish_quic_connection(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn establish_quic_connection(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         //create and establish self-sign certificates - based of quinn-rs example
 
         let (certs, key) = {
@@ -148,14 +150,30 @@ impl TorrentClient {
                 _ => {
                     return Err(Box::new(std::io::Error::new(ErrorKind::Unsupported, "failed to create or retrieve cert")))
                 }
-
-                
             };
 
             (vec![cert], key)
         };
         
+       let mut server_crypto = rustls::ServerConfig::builder()
+           .with_no_client_auth()
+           .with_single_cert(certs, key)?; 
+        //set my custom expected ALPN (Application-Layer Protocol Negotiation)
+        server_crypto.alpn_protocols = vec![b"helpful-serf-p2p".to_vec()];
         
+        //todo consider adding keylogging
+        
+        let server_config = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
+        
+        //todo consider setting max-uni-streams if thats necessary for us (control security)
+        let socket = self.socket.take().unwrap();
+        
+        let endpoint = Endpoint::new(
+            quinn::EndpointConfig::default(),
+            Some(server_config),
+            socket.into_std().unwrap(),
+            Arc::new(TokioRuntime),
+        )?;
         
         Ok(())
     }
