@@ -8,7 +8,6 @@ service Connector {
     rpc advertise (FileMessage) returns(PeerId);
 }
 
-
 message PeerId {
     uint32 ipaddr = 1;
     uint32 port = 2;
