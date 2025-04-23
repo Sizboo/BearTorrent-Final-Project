@@ -70,12 +70,14 @@ impl TorrentClient {
         
         let send_arc = Arc::clone(&self);
         
+        let punch_string = b"HELPFUL_SERF";
+        
         println!("Starting Send to peer ip: {}, port: {}", ip_addr, port);
         
         let send_task = tokio::spawn(async move {
-            for i in 0..50 {
+            for i in 0..25 {
                 println!("Send Attempt: {}", i);
-                let res = self.socket.send_to(b"whatup dawg", peer_addr).await;
+                let res = self.socket.send_to(punch_string, peer_addr).await;
                 
                 if res.is_err() {
                     println!("Send Failed: {}", res.err().unwrap());
@@ -92,6 +94,9 @@ impl TorrentClient {
                 match send_arc.socket.recv_from(&mut recv_buf).await {
                     Ok((n, src)) => {
                         println!("Received from {}: {:?}", src, &recv_buf[..n]);
+                        if &recv_buf[..n] == punch_string {
+                            println!("Punched SUCCESS {}", src);
+                        }
                         break;
                     }
                     Err(e) => {
