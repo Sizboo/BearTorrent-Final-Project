@@ -1,4 +1,5 @@
 syntax = "proto3";
+import "google/protobuf/empty.proto";
 package connection;
 
 service Connector {
@@ -20,4 +21,13 @@ message FileMessage {
 
 message PeerList {
     repeated PeerId list = 1;
+}
+
+service Turn {
+    rpc establish_relay (TurnPair) returns (google.protobuf.Empty);
+}
+
+message TurnPair {
+    PeerId sender = 1;
+    PeerId receiver = 2;
 }
