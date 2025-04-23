@@ -26,7 +26,7 @@ const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.ru
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
     client: ConnectorClient<Channel>,
-    identifier: u32,
+    uid: String,
 }
 
 impl ServerConnection {
@@ -39,11 +39,37 @@ impl ServerConnection {
 
         let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
             .connect().await?;
+        
+        
         //todo add identifier and its associated implementation on server
+        //1. get uuid
+        let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
+            .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
+        let path = dirs.data_local_dir();
+        let uid_path = path.join("uuid.der");
+        
+        let mut uid= "".to_string();
+        
+        if uid_path.exists() {
+            uid = std::fs::read_to_string(&uid_path)?;
+            
+            //todo verify server has uid
+        }
+        //2. get new uid from server 
+        else {
+            
+        }
+        
+        
+        
+        //update id information
+        fs::create_dir_all(&path)?;
+        fs::write(&uid_path, uid.clone())?;
 
         Ok( 
             ServerConnection {
                 client: ConnectorClient::new(endpoint),
+                uid,
             }
         )
     }
