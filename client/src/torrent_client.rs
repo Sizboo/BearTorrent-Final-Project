@@ -1,9 +1,12 @@
+use std::fs;
+use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use stunclient::StunClient;
 use std::net::UdpSocket;
 use tokio::net::UdpSocket as TokioUdpSocket;
 use std::sync::Arc;
 use std::time::Duration;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::time::sleep;
 use tokio::try_join;
 use tonic::Request;
@@ -75,8 +78,7 @@ impl TorrentClient {
         println!("Starting Send to peer ip: {}, port: {}", ip_addr, port);
         
         let send_task = tokio::spawn(async move {
-            for i in 0..25 {
-                println!("Send Attempt: {}", i);
+            for i in 0..50 {
                 let res = self.socket.send_to(punch_string, peer_addr).await;
                 
                 if res.is_err() {
@@ -96,6 +98,7 @@ impl TorrentClient {
                         println!("Received from {}: {:?}", src, &recv_buf[..n]);
                         if &recv_buf[..n] == punch_string {
                             println!("Punched SUCCESS {}", src);
+                            //todo establish a quic connection
                         }
                         break;
                     }
@@ -109,6 +112,51 @@ impl TorrentClient {
 
         try_join!(send_task, read_task)?;
 
+        Ok(())
+    }
+    
+    async fn establish_quic_connection(&self) -> Result<(), Box<dyn std::error::Error>> {
+        //create and establish self-sign certificates - based of quinn-rs example
+
+        let (certs, key) = {
+            //establish platform-specific paths
+            let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
+                .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
+            let path = dirs.data_local_dir();
+            let cert_path = path.join("cert.der");
+            let key_path = path.join("key.der");
+
+            //get certificates or create new ones
+            let (cert, key) = match fs::read(&cert_path).and_then(|x| Ok((x, fs::read(&key_path)?))) {
+                Ok((cert, key)) => (
+                    CertificateDer::from(cert),
+                    PrivateKeyDer::try_from(key).map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+                ),
+                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    println!("generating self-signed certificate");
+                    let cert_ip = Ipv4Addr::from(self.self_addr.ipaddr).to_string();
+                    let cert = rcgen::generate_simple_self_signed(vec![cert_ip])?;
+                    let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+                    let cert = cert.cert.into();
+
+                    fs::create_dir_all(path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+                    fs::write(&cert_path, &cert).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+                    fs::write(&key_path, key.secret_pkcs8_der()).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+
+                    (cert, key.into())
+                }
+                _ => {
+                    return Err(Box::new(std::io::Error::new(ErrorKind::Unsupported, "failed to create or retrieve cert")))
+                }
+
+                
+            };
+
+            (vec![cert], key)
+        };
+        
+        
+        
         Ok(())
     }
 
