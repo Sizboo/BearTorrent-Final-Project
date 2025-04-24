@@ -6,8 +6,12 @@ service Connector {
     rpc send_file_request (FileMessage) returns (PeerList);
     rpc get_peer (PeerId) returns (PeerId);
     rpc advertise (FileMessage) returns(PeerId);
+    rpc register_client(google.protobuf.Empty) returns (ClientId);
 }
 
+message ClientId {
+  string uid = 1;
+}
 
 message PeerId {
     uint32 ipaddr = 1;
