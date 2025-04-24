@@ -2,7 +2,7 @@ use std::{env, collections::HashMap, net::{IpAddr, SocketAddr, Ipv4Addr}, sync::
 use tonic::{transport::Server, Code, Request, Response, Status, Streaming};
 use connection::{PeerId, PeerList, FileMessage, TurnPair, connector_server::{Connector, ConnectorServer}, turn_server::Turn};
 use tokio::{sync::{Mutex, mpsc}, net::UdpSocket};
-use crate::connection::ClientId;
+use crate::connection::{ClientId};
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -105,10 +105,10 @@ impl Connector for ConnectionService {
 
     async fn register_client(
         &self,
-        _request: Request<Empty>,
+        _request: Request<()>,
     ) -> Result<Response<ClientId>, Status> {
 
-
+        Ok(Response::new(ClientId { uid: "".to_string() }))
     }
 
 
