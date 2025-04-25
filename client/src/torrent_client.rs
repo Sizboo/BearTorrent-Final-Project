@@ -63,7 +63,7 @@ impl TorrentClient {
     }
 
 
-    async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<TokioUdpSocket, Box<dyn std::error::Error>> {
+    async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error>> {
         
         //todo maybe don't take this here
         let socket_arc = Arc::new(self.socket.take().unwrap());
@@ -85,11 +85,12 @@ impl TorrentClient {
                 
                 if token_clone.is_cancelled() {
                     println!("Send Cancelled");
-                    return;
+                    return Ok(socket_arc);
                 }
                 
                 sleep(Duration::from_millis(10)).await;
             }
+            Err(Box::<dyn std::error::Error + Send + Sync>::from("send task finished without succeeding"))
         });
 
 
@@ -102,10 +103,9 @@ impl TorrentClient {
                         if &recv_buf[..n] == punch_string {
                             // println!("Punched SUCCESS {}", src);
                             
-                            //todo cancel send process and break
                             cancel_token.cancel();
-                            join!( send_task);
-                            return Arc::try_unwrap(socket_clone).map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("socket arc is still in use"));
+                            drop(socket_clone);
+                            return Ok(());
                         }
                     }
                     Err(e) => {
@@ -116,13 +116,18 @@ impl TorrentClient {
             }
         });
 
+        let socket_arc = match send_task.await {
+            Ok(Ok(socket)) => socket,
+            Ok(Err(e)) => return Err(e),
+            Err(join_err) => return Err(Box::new(join_err)),
+        };
+
         let read_res = read_task.await?;
-        
-        
         match read_res {
-            Ok(socket) => { 
+            Ok(_) => { 
+                let socket: UdpSocket = Arc::try_unwrap(socket_arc).unwrap();
                 println!("Punch Success: {:?}", socket);
-                Ok(socket) 
+                Ok(socket)
             }
             _ => { Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out"))) }
         }
