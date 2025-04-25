@@ -38,8 +38,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Requesting");
             //todo will need have a requesting process probably
             let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
+            
+            //todo I really need to change how this is done
+            let _ = server_conn.register_server_connection(torrent_client.self_addr);
 
-            let file_hash = 12345;
+            let file_hash = 1234;
 
             let mut peer_list = torrent_client.file_request(server_conn.uid.unwrap(), file_hash).await?;
 
