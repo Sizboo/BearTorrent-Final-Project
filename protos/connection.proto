@@ -2,7 +2,6 @@ syntax = "proto3";
 import "google/protobuf/empty.proto";
 package connection;
 
-
 service Connector {
     rpc send_file_request (FileMessage) returns (PeerList);
     rpc get_peer (PeerId) returns (PeerId);
@@ -11,7 +10,7 @@ service Connector {
 }
 
 message ClientId {
-    string uid = 1;
+  string uid = 1;
 }
 
 message PeerId {
