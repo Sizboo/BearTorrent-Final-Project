@@ -7,62 +7,76 @@ use quinn::{Endpoint, TokioRuntime};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::torrent_client::TorrentClient;
 use tokio::net::UdpSocket as TokioUdpSocket;
-
+use crate::connection::PeerId;
 
 pub struct P2PSender {
-    endpoint: Endpoint
+    endpoint: Endpoint,
+    private_key: Vec<u8>,
 }
 
 impl P2PSender {
-    fn new(endpoint: Endpoint) -> P2PSender {
-        P2PSender { endpoint }
+
+    pub(crate) async fn init_for_certificate(self_addr: PeerId) {
+        //todo this will call se
     }
     pub(crate) async fn create_quic_server(torrent_client: &mut TorrentClient, socket: TokioUdpSocket) -> Result<P2PSender, Box<dyn std::error::Error>> {
         //create and establish self-sign certificates - based of quinn-rs example
 
         //todo cert needs to be stored on the server so that it can be sent to the client
         // next up, refactor this so that the cert is saved on the server
+        // let (certs, key) = {
+        //     //establish platform-specific paths
+        //     let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
+        //         .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
+        //     let path = dirs.data_local_dir();
+        //     let cert_path = path.join("cert.der");
+        //     
+        //     let key_path = path.join("key.der");
+        // 
+        //     //get certificates or create new ones
+        //     let (cert, key) = match fs::read(&cert_path).and_then(|x| Ok((x, fs::read(&key_path)?))) {
+        //         Ok((cert, key)) => (
+        //             CertificateDer::from(cert),
+        //             PrivateKeyDer::try_from(key).map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+        //         ),
+        //         Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+        //             println!("generating self-signed certificate");
+        //             let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
+        //             let cert = rcgen::generate_simple_self_signed(vec![cert_ip])?;
+        //             let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+        //             let cert = cert.cert.into();
+        //             
+        //             
+        // 
+        //             fs::create_dir_all(path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+        //             fs::write(&cert_path, &cert).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+        //             fs::write(&key_path, key.secret_pkcs8_der()).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+        // 
+        //             (cert, key.into())
+        //         }
+        //         _ => {
+        //             return Err(Box::new(std::io::Error::new(ErrorKind::Unsupported, "failed to create or retrieve cert")))
+        //         }
+        //     };
+        // 
+        //     (vec![cert], key)
+        // };
+        
         let (certs, key) = {
-            //establish platform-specific paths
-            let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
-                .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
-            let path = dirs.data_local_dir();
-            let cert_path = path.join("cert.der");
-            
-            let key_path = path.join("key.der");
+            println!("generating self-signed certificate");
+            let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
+            let cert = rcgen::generate_simple_self_signed(vec![cert_ip])?;
+            let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+            let cert = cert.cert.into();
 
-            //get certificates or create new ones
-            let (cert, key) = match fs::read(&cert_path).and_then(|x| Ok((x, fs::read(&key_path)?))) {
-                Ok((cert, key)) => (
-                    CertificateDer::from(cert),
-                    PrivateKeyDer::try_from(key).map_err(|e| Box::<dyn std::error::Error>::from(e))?,
-                ),
-                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    println!("generating self-signed certificate");
-                    let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
-                    let cert = rcgen::generate_simple_self_signed(vec![cert_ip])?;
-                    let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
-                    let cert = cert.cert.into();
-                    
-                    
-
-                    fs::create_dir_all(path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
-                    fs::write(&cert_path, &cert).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
-                    fs::write(&key_path, key.secret_pkcs8_der()).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
-
-                    (cert, key.into())
-                }
-                _ => {
-                    return Err(Box::new(std::io::Error::new(ErrorKind::Unsupported, "failed to create or retrieve cert")))
-                }
-            };
-
-            (vec![cert], key)
+            (vec![cert], key.secret_pkcs8_der().to_vec()) 
         };
+        
+        //todo send certificate to client here
 
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(certs, key)?;
+            .with_single_cert(certs, PrivateKeyDer::try_from(key.clone())?)?;
         //set my custom expected ALPN (Application-Layer Protocol Negotiation)
         server_crypto.alpn_protocols = vec![b"helpful-serf-p2p".to_vec()];
 
@@ -81,7 +95,10 @@ impl P2PSender {
         )?;
 
         Ok(
-            P2PSender::new(endpoint)
+            P2PSender {
+                endpoint,
+                private_key: key,
+            }
         )
     }
     pub(crate) async fn send_data(&self) {

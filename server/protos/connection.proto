@@ -7,6 +7,18 @@ service Connector {
     rpc get_peer (ClientId) returns (PeerId);
     rpc advertise (FileMessage) returns(ClientId);
     rpc register_client(PeerId) returns (ClientId);
+    rpc init_cert_sender(PeerId) returns (google.protobuf.Empty);
+    rpc get_cert(PeerId) returns (Cert);
+    rpc send_cert(CertMessage) returns (google.protobuf.Empty);
+}
+
+message Cert {
+    bytes certificate = 1;
+}
+
+message CertMessage {
+    PeerId peer_id = 1;
+    Cert cert = 2;
 }
 
 message ClientId {

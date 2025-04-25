@@ -4,7 +4,7 @@ use connection::{PeerId, PeerList, FileMessage, TurnPair, connector_server::{Con
 use tokio::{sync::{Mutex, mpsc}, net::UdpSocket};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::connection::{ClientId};
+use crate::connection::{Cert, CertMessage, ClientId};
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -23,6 +23,7 @@ pub struct ConnectionService {
     client_registry: Arc<RwLock<HashMap<ClientId, PeerId>>>,
     file_tracker: Arc<Mutex<HashMap<u32, Vec<Seeder>>>>,
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
+    cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
 }
 
 #[tonic::async_trait]
@@ -143,6 +144,70 @@ impl Connector for ConnectionService {
         Ok(Response::new(uid ))
     }
 
+    /// init_cert_sender() must be called before a quic connection can be established
+    /// this will be used to send the self-signed cert from the "server" to "client"
+    ///
+    /// Convention:
+    ///     Sending Peer = Quic Server
+    ///     Receiving Peer = Quic Client
+    ///
+    /// Therefore, the receiving peer should call init_cert_sender prior to hole punching
+    /// to ensure it can receive the server's self-signed certificate
+    async fn init_cert_sender(
+        &self,
+        request: Request<PeerId>
+    ) -> Result<Response<()>, Status> {
+        let r = request.into_inner();
+
+        //TODO determine type (it will be cert)
+        let (tx, rx ) = mpsc::channel::<Cert>(1);
+        self.cert_sender.write().await.insert(r, (tx, Some(rx)));
+
+        Ok(Response::new(()))
+    }
+    /// get_cer() is used by the client end of the quic connection to get the server's self-signed certificate
+    /// it should be called and waited upon once init_cert_sender() has been called
+    /// get_cert() SHOULD NOT be called unless init_cert_sender() has completed
+    async fn get_cert(
+        &self,
+        request: Request<PeerId>
+    ) -> Result<Response<Cert>, Status> {
+        let self_addr = request.into_inner();
+
+        let mut cert_map = self.cert_sender.write().await;
+
+        let (_cert_send, recv) = cert_map.get_mut(&self_addr).ok_or(Status::not_found("Cert sender not registered"))?;
+        let mut cert_recv = std::mem::take(recv).ok_or_else(|| Status::internal("failed to receive cert from server"))?;
+        drop(cert_map);
+
+        let cert = cert_recv.recv().await.ok_or(Status::internal("failed to receive cert from server"))?;
+
+        Ok(Response::new(cert))
+    }
+
+    ///Send Cert should be used by the server side of quic connection to communicate self-signed cert to the client
+    async fn send_cert(
+        &self,
+        request: Request<CertMessage>
+    ) -> Result<Response<()>, Status> {
+        let r = request.into_inner();
+        
+        let peer_id = match r.peer_id {
+            Some(id) => id,
+            None => return Err(Status::invalid_argument("peer id not returned upon signal from server"))?
+        };
+        let cert_map = self.cert_sender.read().await;
+        let (cert_tx, _cert_rx) = cert_map.get(&peer_id)
+            .ok_or(Status::not_found("Cert sender not registered"))?;
+        
+        let res = cert_tx.send(r.cert.unwrap()).await;
+        
+        if res.is_err() {
+            return Err(Status::internal("failed to send cert to server"))
+        }
+
+        Ok(Response::new(()))
+    }
 
 }
 
