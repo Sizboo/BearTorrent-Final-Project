@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tokio::{try_join};
 use tonic::{Request, Response};
-use connection::{PeerId, ClientId};
+use connection::{PeerId, ClientId, FileMessage};
 use crate::quic_p2p_sender::P2PSender;
 use crate::server_connection::ServerConnection;
 
@@ -109,7 +109,10 @@ impl TorrentClient {
             }
         });
 
-        try_join!(read_task, send_task);
+        let res = try_join!(read_task, send_task);
+        if res.is_err() {
+            return Err(Box::<dyn std::error::Error + Send + Sync>::from(res.err().unwrap()));
+        }
         
         Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out")))
     }
@@ -123,9 +126,17 @@ impl TorrentClient {
 
             let mut server_client = torrent_client.server.client.clone();
             
+            //todo REMOVE THIS and add proper ERROR CHECKING for REAL USE
+            let _ = server_client.advertise(FileMessage {
+                id: torrent_client.server.uid.clone(),
+                info_hash: 1234,
+            }).await;
+            
             // calls get_peer
             //todo remove unwarp error checking IS IMPORTANT HERE
-            let response = server_client.get_peer(torrent_client.server.uid.clone().unwrap()).await;
+            let uid = torrent_client.server.uid.clone().unwrap();
+            println!("My Client ID: {:?}", uid);
+            let response = server_client.get_peer(uid).await;
 
             // waits for response from get_peer
             match response {
