@@ -2,6 +2,8 @@ use std::{env, collections::HashMap, net::{IpAddr, SocketAddr, Ipv4Addr}, sync::
 use tonic::{transport::Server, Code, Request, Response, Status, Streaming};
 use connection::{PeerId, PeerList, FileMessage, TurnPair, connector_server::{Connector, ConnectorServer}, turn_server::Turn};
 use tokio::{sync::{Mutex, mpsc}, net::UdpSocket};
+use tokio::sync::RwLock;
+use uuid::Uuid;
 use crate::connection::{ClientId};
 
 pub mod connection {
@@ -11,15 +13,16 @@ pub mod connection {
 /// storing this in the tracker map so we can contact clients in the seeder process
 #[derive(Debug)]
 struct Seeder {
-    peer: PeerId,
-    notify: mpsc::Sender<PeerId>,
+    client_id: ClientId,
+    notify: mpsc::Sender<ClientId>,
 }
 
 
 #[derive(Debug, Default)]
 pub struct ConnectionService {
+    client_registry: Arc<RwLock<HashMap<ClientId, PeerId>>>,
     file_tracker: Arc<Mutex<HashMap<u32, Vec<Seeder>>>>,
-    send_tracker: Arc<Mutex<HashMap<PeerId, mpsc::Receiver<PeerId>>>>,
+    send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
 }
 
 #[tonic::async_trait]
@@ -32,7 +35,7 @@ impl Connector for ConnectionService {
         request: Request<FileMessage>,
     ) -> Result<Response<PeerList>, Status> {
         let r = request.into_inner();
-        let requester = r.clone().id.unwrap_or(PeerId { ipaddr: 0, port: 0 });
+        let requester = r.clone().id.unwrap_or(ClientId { uid: "".to_string() });
 
         let mut file_tracker = self.file_tracker.lock().await;
 
@@ -40,12 +43,18 @@ impl Connector for ConnectionService {
         if let Some(seeders) = file_tracker.get_mut(&r.info_hash) {
             //todo implement this so that it selects specific peers (or pieces out file)
             for seeder in seeders.iter_mut() {
-                let _ = seeder.notify.send(requester.clone()).await;
+                
+                let res = seeder.notify.send(requester.clone()).await;
+                
+                if res.is_err() {
+                    return Err(Status::internal("failed to send to seeder"))?
+                }
             }
 
             // returns a list of all peers that have a file
             //todo this needs to send THE seeder/s that are sharing for hole punching, not necessarily everyone with file
-            let peer_list = seeders.iter().map(|s| s.peer.clone()).collect();
+            let map = self.client_registry.read().await;
+            let peer_list = seeders.iter().filter_map( |s| map.get(&s.client_id).cloned()).collect();
             Ok(Response::new(PeerList { list: peer_list }))
         } else {
             // just returns an empty list
@@ -56,17 +65,22 @@ impl Connector for ConnectionService {
     ///this function is used by clients willing to share data to get peers who request data.
     /// clients should listen to this service at all times they are willing to send.
     //todo consider renaming
-    async fn get_peer(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
+    async fn get_peer(&self, request: Request<ClientId>) -> Result<Response<PeerId>, Status> {
         println!("get_peer called");
-        let peer_id = request.into_inner();
+        let uid = request.into_inner(); 
         
         //todo if we implement states (offline, seeding) should first update its state on server to sharing
         // any time in offline status it will not be selected
 
 
-        match self.send_tracker.lock().await.get_mut(&peer_id) {
+        match self.send_tracker.lock().await.get_mut(&uid) {
             Some(recv) => {
-                let peer_id = recv.recv().await.ok_or(Status::new(Code::Internal, "peer id not returned upon signal from server"))?;
+                let client_id = recv.recv().await
+                    .ok_or(Status::new(Code::Internal, "peer id not returned upon signal from server"))?;
+                
+                let peer_id = self.client_registry.read().await
+                    .get(&client_id).cloned().ok_or(Status::internal("failed to get peer id"))?;
+                
                 Ok(Response::new(peer_id))
             }
             None => Err(Status::internal("dropped")),
@@ -79,36 +93,54 @@ impl Connector for ConnectionService {
     async fn advertise(
         &self,
         request: Request<FileMessage>,
-    ) -> Result<Response<PeerId>, Status> {
+    ) -> Result<Response<ClientId>, Status> {
         let r = request.into_inner();
 
         println!("advertising file: {:}", r.info_hash);
 
-        let peer_id = match r.id {
+        let client_id = match r.id {
             Some(id) => id,
-            None => return Err(Status::invalid_argument("PeerId missing")),
+            None => return Err(Status::invalid_argument("Client missing")),
         };
 
         let (tx, rx) = mpsc::channel(1);
 
         let mut file_tracker = self.file_tracker.lock().await;
         file_tracker.entry(r.info_hash).or_default().push(Seeder {
-            peer: peer_id.clone(),
+            client_id: client_id.clone(),
             notify: tx,
         });
 
         let mut send_tracker = self.send_tracker.lock().await;
-        send_tracker.insert(peer_id, rx);
+        send_tracker.insert(client_id.clone(), rx);
 
-        Ok( Response::new(peer_id) )
+        Ok( Response::new(client_id) )
     }
 
     async fn register_client(
         &self,
-        _request: Request<()>,
+        request: Request<PeerId>,
     ) -> Result<Response<ClientId>, Status> {
+        
+        let uid = ClientId { uid: "".to_string() };
+        
+        loop {
+            let uuid = Uuid::new_v4();
+            let uid = ClientId{ uid: uuid.to_string()};
+            
+            if !self.client_registry.read().await.contains_key(&uid) {
+                break;
+            }
 
-        Ok(Response::new(ClientId { uid: "".to_string() }))
+        }
+        
+        if uid.uid.is_empty() {
+            return Err(Status::internal("failed to generate uid"))?
+        }
+        
+        self.client_registry.write().await.insert(uid.clone(), request.into_inner());
+
+        Ok(Response::new(uid ))
     }
 
 
