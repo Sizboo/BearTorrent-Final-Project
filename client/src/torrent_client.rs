@@ -14,8 +14,7 @@ use tokio::{join, try_join};
 use tonic::{Request, Response};
 use tonic::service::interceptor::ResponseBody;
 use tonic::transport::{Channel, ClientTlsConfig, Server};
-use connection::{PeerId, connector_client::ConnectorClient};
-use crate::connection::FileMessage;
+use connection::{PeerId, connector_client::ConnectorClient, ClientId};
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -26,7 +25,7 @@ const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.ru
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
     client: ConnectorClient<Channel>,
-    uid: String,
+    pub(crate) uid: Option<ClientId>,
 }
 
 impl ServerConnection {
@@ -40,38 +39,44 @@ impl ServerConnection {
         let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
             .connect().await?;
         
+        let client = ConnectorClient::new(endpoint);
         
-        //todo add identifier and its associated implementation on server
+        //todo use this to figure out id persistence across sessions
         //1. get uuid
-        let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
-            .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
-        let path = dirs.data_local_dir();
-        let uid_path = path.join("uuid.der");
-        
-        let mut uid= "".to_string();
-        
-        if uid_path.exists() {
-            uid = std::fs::read_to_string(&uid_path)?;
-            
-            //todo verify server has uid
-        }
-        //2. get new uid from server 
-        else {
-            
-        }
-        
-        
-        
+        // let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
+        //     .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
+        // let path = dirs.data_local_dir();
+        // let uid_path = path.join("uuid.der");
+        // 
+        // let mut uid= "".to_string();
+        // 
+        // if uid_path.exists() {
+        //     uid = std::fs::read_to_string(&uid_path)?;
+        //     
+        //     //todo verify server has uid
+        // }
+        // //2. get new uid from server 
+        // else {
+        //     
+        // }
         //update id information
-        fs::create_dir_all(&path)?;
-        fs::write(&uid_path, uid.clone())?;
+        // fs::create_dir_all(&path)?;
+        // fs::write(&uid_path, uid.clone())?;
+        
 
         Ok( 
             ServerConnection {
-                client: ConnectorClient::new(endpoint),
-                uid,
+                client,
+                uid: None,
             }
         )
+    }
+    
+    pub async fn register_server_connection(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+        let uid = self.client.register_client(self_addr).await?;
+        self.uid = Some(uid.into_inner());
+        
+        Ok(())
     }
 }
 
@@ -162,7 +167,7 @@ pub struct TorrentClient {
 
 impl TorrentClient {
 
-    pub async fn new(server: ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
+    pub async fn new(server: &mut ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
 
         //bind port and get public facing id
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
@@ -184,8 +189,9 @@ impl TorrentClient {
         };
         socket.set_nonblocking(true)?;
         
-
-        socket.set_nonblocking(true)?;
+        server.register_server_connection(self_addr.clone()).await?;
+        
+        let server = server.clone();
         
         Ok(
             TorrentClient {
@@ -252,15 +258,16 @@ impl TorrentClient {
 
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
-    pub async fn seeding(server: ServerConnection) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn seeding(server: &mut ServerConnection) -> Result<(), Box<dyn std::error::Error>> {
         
         loop {
-            let mut torrent_client = TorrentClient::new(server.clone()).await?;
+            let mut torrent_client = TorrentClient::new(server).await?;
 
             let mut server_client = torrent_client.server.client.clone();
             
             // calls get_peer
-            let response = server_client.get_peer(torrent_client.self_addr).await;
+            //todo remove unwarp error checking IS IMPORTANT HERE
+            let response = server_client.get_peer(torrent_client.server.uid.clone().unwrap()).await;
 
             // waits for response from get_peer
             match response {
@@ -301,12 +308,12 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&self, file_hash: u32) -> Result<connection::PeerList, Box<dyn std::error::Error>> {
+    pub async fn file_request(&self, client_id: ClientId , file_hash: u32) -> Result<connection::PeerList, Box<dyn std::error::Error>> {
         let mut client = self.server.client.clone();
         
         
         let request = Request::new(connection::FileMessage {
-            id: Some(self.self_addr),
+            id: Some(client_id),
             info_hash: file_hash,
         });
         
@@ -340,12 +347,12 @@ impl TorrentClient {
         Ok(())
     }
     
-    pub async fn advertise(&self) -> Result<PeerId, Box<dyn std::error::Error>> {
+    pub async fn advertise(&self, client_id: ClientId) -> Result<ClientId, Box<dyn std::error::Error>> {
         let mut client = self.server.client.clone();
         
         //todo make hash active
         let request = Request::new(connection::FileMessage {
-            id: Some(self.self_addr),
+            id: Some(client_id),
             info_hash: 12345,
         });
         
