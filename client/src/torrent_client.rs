@@ -125,13 +125,13 @@ impl TorrentClient {
             let mut torrent_client = TorrentClient::new(server).await?;
 
             let mut server_client = torrent_client.server.client.clone();
-            
+
             //todo REMOVE THIS and add proper ERROR CHECKING for REAL USE
             let _ = server_client.advertise(FileMessage {
                 id: torrent_client.server.uid.clone(),
                 info_hash: 1234,
             }).await;
-            
+
             // calls get_peer
             //todo remove unwarp error checking IS IMPORTANT HERE
             let uid = torrent_client.server.uid.clone().unwrap();

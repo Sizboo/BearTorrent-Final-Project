@@ -1,56 +1,34 @@
 mod torrent_client;
-mod server_connection;
-mod quic_p2p_sender;
+
 use torrent_client::TorrentClient;
 
-use crate::server_connection::ServerConnection;
+use tonic::transport::{Channel, ClientTlsConfig};
+
 
 pub mod connection {
     tonic::include_proto!("connection");
 }
 
+const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider()).expect("cannot install default provider");
+    //tls config
+    //webki roots uses Mozilla's certificate store
+    let tls = ClientTlsConfig::new()
+        .with_webpki_roots()
+        .domain_name("helpful-serf-server-1016068426296.us-south1.run.app");
 
-    let mut server_conn = ServerConnection::new().await?;
+    let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
+        .connect().await?;
 
+    let torrent_client = TorrentClient::new(endpoint);
 
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    let _ = torrent_client.seeding().await?;
+    
 
-    let command = input.trim();
-    // let server_conn_clone = server_conn.clone();
-
-    match command {
-        "s" => {
-            println!("Seeding");
-
-            let seeding = tokio::spawn( async move {
-                TorrentClient::seeding(&mut server_conn).await.unwrap();
-            });
-            
-            seeding.await.expect("seeding broken");
-        }
-        "r" => {
-            println!("Requesting");
-            //todo will need have a requesting process probably
-            let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
-
-            let file_hash = 12345;
-
-            let mut peer_list = torrent_client.file_request(server_conn.uid.unwrap(), file_hash).await?;
-
-            torrent_client.get_file_from_peer(peer_list.list.pop().unwrap()).await?;
-        }
-        _ => {
-            println!("Unknown command: {}", command);
-        }
-
-    }
-
+    
 
 Ok(())
 
