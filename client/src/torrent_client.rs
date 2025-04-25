@@ -169,7 +169,7 @@ impl TorrentClient {
         //hole punch
         let socket = self.hole_punch(peer_id).await?;
         //start quick server
-        let p2p_sender = P2PSender::create_quic_server(self, socket).await?;
+        let p2p_sender = P2PSender::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
         p2p_sender.send_data().await;
         //todo 3 TURN 
         
