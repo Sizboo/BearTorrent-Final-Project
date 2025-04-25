@@ -1,11 +1,9 @@
 mod torrent_client;
-
-use std::net::{ToSocketAddrs};
-use std::sync::Arc;
+mod server_connection;
+mod quic_p2p_sender;
 use torrent_client::TorrentClient;
 
-use tonic::transport::{Channel, ClientTlsConfig};
-use crate::torrent_client::ServerConnection;
+use crate::server_connection::ServerConnection;
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -15,41 +13,43 @@ pub mod connection {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
+    rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider()).expect("cannot install default provider");
 
     let mut server_conn = ServerConnection::new().await?;
 
-    
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
 
-        let command = input.trim();
-        // let server_conn_clone = server_conn.clone();
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
 
-        match command {
-            "s" => {
-                println!("Seeding");
+    let command = input.trim();
+    // let server_conn_clone = server_conn.clone();
 
-                tokio::spawn( async move {
-                    TorrentClient::seeding(&mut server_conn).await.unwrap();
-                });
-            }
-            "r" => {
-                println!("Requesting");
-                //todo will need have a requesting process probably
-                let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
+    match command {
+        "s" => {
+            println!("Seeding");
 
-                let file_hash = 12345;
-
-                let mut peer_list = torrent_client.file_request(server_conn.uid.unwrap(), file_hash).await?;
-
-                torrent_client.get_file_from_peer(peer_list.list.pop().unwrap()).await?;
-            }
-            _ => {
-                println!("Unknown command: {}", command);
-            }
-
+            let seeding = tokio::spawn( async move {
+                TorrentClient::seeding(&mut server_conn).await.unwrap();
+            });
+            
+            seeding.await.expect("seeding broken");
         }
-    
+        "r" => {
+            println!("Requesting");
+            //todo will need have a requesting process probably
+            let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
+
+            let file_hash = 12345;
+
+            let mut peer_list = torrent_client.file_request(server_conn.uid.unwrap(), file_hash).await?;
+
+            torrent_client.get_file_from_peer(peer_list.list.pop().unwrap()).await?;
+        }
+        _ => {
+            println!("Unknown command: {}", command);
+        }
+
+    }
 
 
 Ok(())
