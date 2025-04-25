@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         "r" => {
             println!("Requesting");
-            //todo will need have a requesting process probably
+            //todo will need have a requesting process like seeding above
             let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
             
             //todo I really need to change how this is done

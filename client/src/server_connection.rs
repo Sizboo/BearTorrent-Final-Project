@@ -44,7 +44,6 @@ impl ServerConnection {
         // fs::create_dir_all(&path)?;
         // fs::write(&uid_path, uid.clone())?;
 
-
         Ok(
             ServerConnection {
                 client,

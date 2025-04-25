@@ -20,12 +20,15 @@ impl P2PSender {
     pub(crate) async fn create_quic_server(torrent_client: &mut TorrentClient, socket: TokioUdpSocket) -> Result<P2PSender, Box<dyn std::error::Error>> {
         //create and establish self-sign certificates - based of quinn-rs example
 
+        //todo cert needs to be stored on the server so that it can be sent to the client
+        // next up, refactor this so that the cert is saved on the server
         let (certs, key) = {
             //establish platform-specific paths
             let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
                 .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
             let path = dirs.data_local_dir();
             let cert_path = path.join("cert.der");
+            
             let key_path = path.join("key.der");
 
             //get certificates or create new ones
@@ -40,6 +43,8 @@ impl P2PSender {
                     let cert = rcgen::generate_simple_self_signed(vec![cert_ip])?;
                     let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
                     let cert = cert.cert.into();
+                    
+                    
 
                     fs::create_dir_all(path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
                     fs::write(&cert_path, &cert).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
