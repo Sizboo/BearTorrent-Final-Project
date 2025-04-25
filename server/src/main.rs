@@ -67,13 +67,13 @@ impl Connector for ConnectionService {
     //todo consider renaming
     async fn get_peer(&self, request: Request<ClientId>) -> Result<Response<PeerId>, Status> {
         println!("get_peer called");
-        let uid = request.into_inner(); 
+        let client_id = request.into_inner(); 
         
         //todo if we implement states (offline, seeding) should first update its state on server to sharing
         // any time in offline status it will not be selected
 
 
-        match self.send_tracker.lock().await.get_mut(&uid) {
+        match self.send_tracker.lock().await.get_mut(&client_id) {
             Some(recv) => {
                 let client_id = recv.recv().await
                     .ok_or(Status::new(Code::Internal, "peer id not returned upon signal from server"))?;
