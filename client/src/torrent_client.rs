@@ -192,7 +192,7 @@ impl TorrentClient {
         println!("Returned value {:?}", socket);
         //start quick server
         let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
-        p2p_sender.send_data().await;
+        p2p_sender.send_data().await?;
         //todo 3 TURN 
         
         Ok(())

@@ -24,26 +24,26 @@ impl QuicP2PConn {
     /// the sooner this is called the better.
     /// By convention, the receiving peer is the client and will ideally call this prior to hole punching
     pub(crate) async fn init_for_certificate(
-        self, 
+        self,
         self_addr: PeerId,
         server: ServerConnection,
     ) {
         let mut server_connection = server.client.clone();
-        
+
         let request = Request::new(self_addr);
-        
+
         let res = server_connection.init_cert_sender(request).await;
         println!("Client init certificate {:?}", res);
         eprintln!("Response from init for certificate {:?}", res)
     }
-    
+
     pub(crate) async fn create_quic_server(
-        torrent_client: &mut TorrentClient, 
-        socket: TokioUdpSocket, 
+        torrent_client: &mut TorrentClient,
+        socket: TokioUdpSocket,
         peer_id: PeerId,
         server: ServerConnection
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
-        
+
         let (certs, key) = {
             println!("generating self-signed certificate");
             let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
@@ -51,7 +51,7 @@ impl QuicP2PConn {
             let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
             let cert: CertificateDer = cert.cert.into();
 
-            (vec![cert], key.secret_pkcs8_der().to_vec()) 
+            (vec![cert], key.secret_pkcs8_der().to_vec())
         };
 
         //send certificate to client here
@@ -62,11 +62,11 @@ impl QuicP2PConn {
             cert: Some(Cert { certificate: cert_bytes }),
         });
         println!("Server sent client certificate!");
-        
-        
+
+
         let res = server_connection.send_cert(request).await?;
         println!("Self Signed send response {:?}", res);
-        
+
 
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
@@ -95,31 +95,31 @@ impl QuicP2PConn {
             }
         )
     }
-    
+
     pub (crate) async fn create_quic_client (
         socket: TokioUdpSocket,
         self_addr: PeerId,
         server: ServerConnection,
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
         let mut server_connection = server.client.clone();
-        
+
         let request = Request::new(self_addr);
         let cert_res = server_connection.get_cert(request).await?.into_inner();
         let cert_bytes = cert_res.certificate;
-        
+
         println!("Client received certificate {:?}", cert_bytes);
-        
+
         let mut roots = rustls::RootCertStore::empty();
-        
+
         roots.add(CertificateDer::try_from(&cert_bytes[..])?)?;
-        
+
         let mut client_crypto = rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
 
         //set crypto with custom protocol type
         client_crypto.alpn_protocols = vec![b"helpful-serf-p2p".to_vec()];
-        
+
         let client_config = quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
 
         let mut endpoint = Endpoint::new(
@@ -128,7 +128,7 @@ impl QuicP2PConn {
             socket.into_std().unwrap(),
             Arc::new(TokioRuntime),
         )?;
-        
+
         endpoint.set_default_client_config(client_config);
 
         Ok( QuicP2PConn {
@@ -136,19 +136,22 @@ impl QuicP2PConn {
             private_key: None,
         })
     }
-    pub(crate) async fn send_data(&self) {
-        let conn = self.endpoint.accept().await.unwrap();
-
+    pub(crate) async fn send_data(&self) 
+    -> Result<(), Box<dyn std::error::Error>> {
+        let conn = self.endpoint.accept().await.ok_or("failed to accept")?;
+        
         println!("Connection Received!");
+        
+        Ok(())
 
     }
-    
-    pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr) 
+
+    pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr)
     -> Result<(), Box<dyn std::error::Error>> {
         let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
         
         println!("Quic Connection Connected!");
-        
+
         Ok(())
     }
 }
