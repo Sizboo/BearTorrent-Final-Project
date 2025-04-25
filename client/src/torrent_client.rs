@@ -6,7 +6,7 @@ use tokio::net::{UdpSocket as TokioUdpSocket, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tokio::{join};
+use tokio::{join, try_join};
 use tonic::{Request, Response};
 use connection::{PeerId, ClientId, FileMessage};
 use crate::quic_p2p_sender::QuicP2PConn;
@@ -85,7 +85,7 @@ impl TorrentClient {
                 
                 if token_clone.is_cancelled() {
                     println!("Send Cancelled");
-                    break;
+                    return;
                 }
                 
                 sleep(Duration::from_millis(10)).await;
@@ -104,7 +104,7 @@ impl TorrentClient {
                             
                             //todo cancel send process and break
                             cancel_token.cancel();
-                            join!(send_task);
+                            join!( send_task);
                             return Arc::try_unwrap(socket_clone).map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("socket arc is still in use"));
                         }
                     }
