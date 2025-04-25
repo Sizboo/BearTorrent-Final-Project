@@ -1,7 +1,8 @@
+use std::error::Error;
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use stunclient::StunClient;
-use tokio::net::UdpSocket as TokioUdpSocket;
+use tokio::net::{UdpSocket as TokioUdpSocket, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -83,6 +84,7 @@ impl TorrentClient {
                 }
                 
                 if token_clone.is_cancelled() {
+                    println!("Send Cancelled");
                     break;
                 }
                 
@@ -98,12 +100,11 @@ impl TorrentClient {
                     Ok((n, src)) => {
                         println!("Received from {}: {:?}", src, &recv_buf[..n]);
                         if &recv_buf[..n] == punch_string {
-                            println!("Punched SUCCESS {}", src);
+                            // println!("Punched SUCCESS {}", src);
                             
                             //todo cancel send process and break
                             cancel_token.cancel();
-                            let res = join!(send_task);
-                            eprintln!("error res {:?}", res);
+                            join!(send_task);
                             return Arc::try_unwrap(socket_clone).map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("socket arc is still in use"));
                         }
                     }
@@ -115,10 +116,14 @@ impl TorrentClient {
             }
         });
 
-        let res = join!(read_task);
-        eprintln!("response error {:?}", res);
+        let read_res = read_task.await?;
         
-        Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out")))
+        
+        match read_res {
+            Ok(socket) => { Ok(socket) }
+            _ => { Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out"))) }
+        }
+        
     }
 
     ///seeding is used as a listening process to begin sending data upon request
@@ -176,6 +181,7 @@ impl TorrentClient {
         //todo 2. try hole punch
         //hole punch
         let socket = self.hole_punch(peer_addr).await?;
+        println!("Punched SUCCESS {}", socket.peer_addr().unwrap());
         //start quick server
         let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
         p2p_sender.send_data().await;
