@@ -122,11 +122,11 @@ impl Connector for ConnectionService {
         request: Request<PeerId>,
     ) -> Result<Response<ClientId>, Status> {
         
-        let uid = ClientId { uid: "".to_string() };
+        let mut uid = ClientId { uid: "".to_string() };
         
         loop {
             let uuid = Uuid::new_v4();
-            let uid = ClientId{ uid: uuid.to_string()};
+            uid = ClientId{ uid: uuid.to_string()};
             
             if !self.client_registry.read().await.contains_key(&uid) {
                 break;
