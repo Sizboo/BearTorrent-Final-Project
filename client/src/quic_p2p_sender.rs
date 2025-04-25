@@ -1,6 +1,6 @@
 use std::{error, fs};
 use std::io::ErrorKind;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Endpoint, TokioRuntime};
@@ -111,7 +111,7 @@ impl QuicP2PConn {
         
         let mut roots = rustls::RootCertStore::empty();
         
-        roots.add(CertificateDer::try_from(&cert_bytes[..])?).map_err(|e|  Err(Box::new(e)));
+        roots.add(CertificateDer::try_from(&cert_bytes[..])?)?;
         
         let mut client_crypto = rustls::ClientConfig::builder()
             .with_root_certificates(roots)
@@ -141,5 +141,14 @@ impl QuicP2PConn {
 
         println!("Connection Received!");
 
+    }
+    
+    pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr) 
+    -> Result<(), Box<dyn std::error::Error>> {
+        let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
+        
+        println!("Quic Connection Connected!");
+        
+        Ok(())
     }
 }
