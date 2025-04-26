@@ -121,7 +121,7 @@ impl TorrentClient {
         };
 
         // spawn read task here with a timeout of 5 seconds
-        // that's is how I'm checking if the punch fails, and revert to TURN
+        // that's how I'm checking if the punch fails, and revert to TURN
         let read_res = timeout(Duration::from_secs(5), read_task).await;
         match read_res {
             Ok(inner) => match inner {
