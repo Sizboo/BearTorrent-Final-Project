@@ -1,9 +1,9 @@
 mod turn;
 
-use std::{env, collections::HashMap, net::{IpAddr, SocketAddr, Ipv4Addr}, sync::Arc};
-use tonic::{transport::Server, Code, Request, Response, Status, Streaming};
-use connection::{PeerId, PeerList, FileMessage, TurnPair, connector_server::{Connector, ConnectorServer}, turn_server::Turn};
-use tokio::{sync::{Mutex, mpsc}, net::UdpSocket};
+use std::{env, collections::HashMap, sync::Arc};
+use tonic::{transport::Server, Code, Request, Response, Status};
+use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
+use tokio::sync::{Mutex, mpsc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use crate::connection::{Cert, CertMessage, ClientId};
@@ -125,7 +125,7 @@ impl Connector for ConnectionService {
         request: Request<PeerId>,
     ) -> Result<Response<ClientId>, Status> {
         
-        let mut uid = ClientId { uid: "".to_string() };
+        let mut uid;
         
         loop {
             let uuid = Uuid::new_v4();
