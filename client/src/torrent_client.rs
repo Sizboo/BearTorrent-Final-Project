@@ -1,12 +1,10 @@
-use std::error::Error;
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use stunclient::StunClient;
-use tokio::net::{UdpSocket as TokioUdpSocket, UdpSocket};
+use tokio::net::{UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tokio::{join, try_join};
 use tonic::{Request, Response};
 use connection::{PeerId, ClientId, FileMessage};
 use crate::quic_p2p_sender::QuicP2PConn;
@@ -21,7 +19,7 @@ pub mod connection {
 #[derive(Debug)]
 pub struct TorrentClient {
     server: ServerConnection,
-    socket: Option<TokioUdpSocket>,
+    socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
 }
 
@@ -56,7 +54,7 @@ impl TorrentClient {
         Ok(
             TorrentClient {
                 server,
-                socket: Some(TokioUdpSocket::from_std(socket)?) ,
+                socket: Some(UdpSocket::try_from(socket)?) ,
                 self_addr,
             },
         )
@@ -66,6 +64,7 @@ impl TorrentClient {
     async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error>> {
         
         //todo maybe don't take this here
+        println!("ORIGINAL SOCKET: {:?}", self.socket);
         let socket_arc = Arc::new(self.socket.take().unwrap());
         let socket_clone = socket_arc.clone();
         let cancel_token = CancellationToken::new();
@@ -125,7 +124,7 @@ impl TorrentClient {
         let read_res = read_task.await?;
         match read_res {
             Ok(_) => { 
-                let socket: UdpSocket = Arc::try_unwrap(socket_arc).unwrap();
+                let socket = Arc::try_unwrap(socket_arc).unwrap();
                 println!("Punch Success: {:?}", socket);
                 Ok(socket)
             }
