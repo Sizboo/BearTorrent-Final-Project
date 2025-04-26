@@ -136,12 +136,17 @@ impl QuicP2PConn {
             private_key: None,
         })
     }
-    pub(crate) async fn send_data(&self) 
+    pub(crate) async fn send_data(&self)
     -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.endpoint.accept().await.ok_or("failed to accept")?;
-        
-        println!("Connection Received!");
-        
+        let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
+
+        let conn = conn_listener.await?;
+        let mut sender = conn.open_uni().await?;
+
+        sender.write_all(b"sending data directly to my peer!").await?;
+        sender.finish()?;
+
+
         Ok(())
 
     }
@@ -149,8 +154,13 @@ impl QuicP2PConn {
     pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr)
     -> Result<(), Box<dyn std::error::Error>> {
         let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
-        
-        println!("Quic Connection Connected!");
+
+        let mut recv = conn.accept_uni().await?;
+        let mut buf = vec![0u8; 1024];
+        let n = recv.read(&mut buf).await?.unwrap();
+
+        println!("Received {:?}", String::from_utf8_lossy(&buf[..n]));
+
 
         Ok(())
     }

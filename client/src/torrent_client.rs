@@ -64,7 +64,6 @@ impl TorrentClient {
     async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error>> {
         
         //todo maybe don't take this here
-        println!("ORIGINAL SOCKET: {:?}", self.socket);
         let socket_arc = Arc::new(self.socket.take().unwrap());
         let socket_clone = socket_arc.clone();
         let cancel_token = CancellationToken::new();
