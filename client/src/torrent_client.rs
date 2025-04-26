@@ -165,12 +165,10 @@ impl TorrentClient {
             match response {
                 Ok(res) => {
 
-                    tokio::spawn(async move {
-                        let res = torrent_client.connect_to_peer(res).await;
-                        if res.is_err() {
-                            println!("Connect Failed: {}", res.err().unwrap());
-                        }
-                    });
+                    let res = torrent_client.connect_to_peer(res).await;
+                    if res.is_err() {
+                        println!("Connect Failed: {}", res.err().unwrap());
+                    }
 
                 }
                 Err(e) => {
@@ -194,11 +192,16 @@ impl TorrentClient {
 
         //todo 2. try hole punch
         //hole punch
-        let socket = self.hole_punch(peer_addr).await?;
-        println!("Returned value {:?}", socket);
-        //start quick server
-        let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
-        p2p_sender.quic_listener().await?;
+
+        if let Ok(socket) = self.hole_punch(peer_addr).await {
+            println!("Returned value {:?}", socket);
+            //start quick server
+            let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
+            p2p_sender.quic_listener().await?;
+        } else {
+            // TODO implement TURN
+        }
+
         //todo 3 TURN 
         
         Ok(())
@@ -230,16 +233,18 @@ impl TorrentClient {
         //init the map so cert can be retrieved 
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
-        
 
-        let socket = self.hole_punch(peer_addr).await?;
 
-        let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-        let port = peer_id.port as u16;
-        let peer_addr = SocketAddr::from((ip_addr, port));
+        if let Ok(socket) = self.hole_punch(peer_addr).await {
+            let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+            let port = peer_id.port as u16;
+            let peer_addr = SocketAddr::from((ip_addr, port));
 
-        let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr,self.server.clone()).await?;
-        p2p_conn.connect_to_peer_server(peer_addr).await?;
+            let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr,self.server.clone()).await?;
+            p2p_conn.connect_to_peer_server(peer_addr).await?;
+        } else {
+            // TODO implement TURN
+        }
 
         Ok(())
     }

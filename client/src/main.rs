@@ -28,11 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "s" => {
             println!("Seeding");
 
-            let seeding = tokio::spawn( async move {
-                TorrentClient::seeding(&mut server_conn).await.unwrap();
-            });
-            
-            seeding.await.expect("seeding broken");
+            TorrentClient::seeding(&mut server_conn).await.unwrap();
         }
         "r" => {
             println!("Requesting");
