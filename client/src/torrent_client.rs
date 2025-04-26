@@ -4,7 +4,7 @@ use stunclient::StunClient;
 use tokio::net::{UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tonic::{Request, Response};
 use connection::{PeerId, ClientId, FileMessage};
 use crate::quic_p2p_sender::QuicP2PConn;
@@ -91,8 +91,8 @@ impl TorrentClient {
             Err(Box::<dyn std::error::Error + Send + Sync>::from("send task finished without succeeding"))
         });
 
-
-        let read_task = tokio::spawn( async move {
+        // made this a future instead of spawning it directly
+        let read_task = async move {
             let mut recv_buf = [0u8; 1024];
             loop {
                 match socket_clone.recv_from(&mut recv_buf).await {
@@ -112,7 +112,7 @@ impl TorrentClient {
                     },
                 }
             }
-        });
+        };
 
         let socket_arc = match send_task.await {
             Ok(Ok(socket)) => socket,
@@ -120,16 +120,24 @@ impl TorrentClient {
             Err(join_err) => return Err(Box::new(join_err)),
         };
 
-        let read_res = read_task.await?;
+        // spawn read task here with a timeout of 5 seconds
+        // that's is how I'm checking if the punch fails, and revert to TURN
+        let read_res = timeout(Duration::from_secs(5), read_task).await;
         match read_res {
-            Ok(_) => { 
-                let socket = Arc::try_unwrap(socket_arc).unwrap();
-                println!("Punch Success: {:?}", socket);
-                Ok(socket)
+            Ok(inner) => match inner {
+                Ok(_) => {
+                    let socket = Arc::try_unwrap(socket_arc).unwrap();
+                    println!("Punch Success: {:?}", socket);
+                    Ok(socket)
+                }
+                Err(e) => Err(e),
+            },
+            Err(_) => {
+                println!("Punch timeout after 5 seconds.");
+                Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out")))
             }
-            _ => { Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out"))) }
         }
-        
+
     }
 
     ///seeding is used as a listening process to begin sending data upon request
@@ -158,12 +166,12 @@ impl TorrentClient {
                 Ok(res) => {
 
                     tokio::spawn(async move {
-                        let res = torrent_client.connect_to_peer(res).await; 
+                        let res = torrent_client.connect_to_peer(res).await;
                         if res.is_err() {
                             println!("Connect Failed: {}", res.err().unwrap());
                         }
                     });
-               
+
                 }
                 Err(e) => {
                     eprintln!("Failed to get peer: {:?}", e);
@@ -223,13 +231,13 @@ impl TorrentClient {
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
         
-        
+
         let socket = self.hole_punch(peer_addr).await?;
 
         let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
-        
+
         let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr,self.server.clone()).await?;
         p2p_conn.connect_to_peer_server(peer_addr).await?;
 
