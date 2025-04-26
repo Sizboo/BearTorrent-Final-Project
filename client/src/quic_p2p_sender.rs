@@ -142,14 +142,14 @@ impl QuicP2PConn {
 
         let conn = conn_listener.await?;
         
-        tokio::spawn(async move {
+        let send_task = tokio::spawn(async move {
             let res = QuicP2PConn::send_data(conn).await;
             if res.is_err() {
                 eprintln!("QuicP2PConn::send_data failed {:?}", res);
             }
         });
         
-        
+        send_task.await?;
         Ok(())
 
     }
@@ -171,14 +171,14 @@ impl QuicP2PConn {
     -> Result<(), Box<dyn std::error::Error>> {
         let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
 
-        tokio::spawn(async move {
+        let read_task = tokio::spawn(async move {
             let res = QuicP2PConn::recv_data(conn).await;
             if res.is_err() {
                 eprintln!("QuicP2PConn::recv_data failed {:?}", res);
             }
         });
 
-
+        read_task.await?;
         Ok(())
     }
     
