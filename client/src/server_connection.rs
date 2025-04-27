@@ -71,7 +71,7 @@ impl ServerConnection {
         let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
         
         //TEST
-        // socket.connect(&stun_server)?;
+        socket.connect(&stun_server)?;
         
         let client = StunClient::new(stun_server);
         let external_addr = client.query_external_address(&socket)?;
