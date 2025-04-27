@@ -305,15 +305,19 @@ impl TurnFallback {
     ) -> Result<Self, Box<dyn std::error::Error>> {
 
         // connect to server
+        // TODO ask ben how to do this right
         let mut client = TurnClient::connect("https://helpful-serf-server-1016068426296.us-south1.run.app:50051")
             .await?;
 
+        // channels and make a stream
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
+        // get inbound stream
         let mut response = client.relay(Request::new(outbound)).await?;
         let mut inbound = response.into_inner();
 
+        // initial packet to be added to TURN sessions
         let init = TurnPacket {
             client_id: Some(self_id.clone()),
             target_id: None,
@@ -321,6 +325,7 @@ impl TurnFallback {
         };
         tx.send(init).await?;
 
+        // spawn receiving task to listen for inbound packets
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
                 // pkt.client_id is the peer who sent this
@@ -330,7 +335,7 @@ impl TurnFallback {
             }
         });
 
-        // Now return an instance you can use to send via TURN:
+        // return tx we can use to send
         Ok(TurnFallback { self_id, tx })
     }
 
@@ -339,12 +344,14 @@ impl TurnFallback {
         target_id: ClientId,
         buf: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // create TurnPacket to send
         let pkt = TurnPacket {
             client_id: Some(self.self_id.clone()),
             target_id: Some(target_id.clone()),
             payload: buf,
         };
 
+        // send packet
         self.tx.send(pkt).await?;
         Ok(())
     }

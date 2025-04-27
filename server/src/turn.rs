@@ -7,6 +7,7 @@ use tonic::{async_trait, Request, Response, Status, Streaming};
 
 #[derive(Debug, Default)]
 pub struct TurnService {
+    /// HashMap used to track ClientIds => mpsc channel we can use to relay to
     sessions: Arc<RwLock<HashMap<ClientId, mpsc::Sender<Result<TurnPacket, Status>>>>>,
 }
 
@@ -14,12 +15,14 @@ pub struct TurnService {
 impl Turn for TurnService {
     type RelayStream = ReceiverStream<Result<TurnPacket, Status>>;
 
+    /// spins up a TURN style relay for use as a last resort
     async fn relay
         (&self,
         request: Request<Streaming<TurnPacket>>
     ) -> Result<Response<Self::RelayStream>, Status> {
         let mut inbound = request.into_inner();
 
+        // get initial TurnPacket to register client
         let first = inbound
             .message()
             .await?
@@ -31,20 +34,20 @@ impl Turn for TurnService {
         self.sessions.write().await.insert(client_id.clone().unwrap(), tx.clone());
 
         let sessions = Arc::clone(&self.sessions);
+
+        // spawn task to relay the rest of the packets
         tokio::spawn(async move {
-            // Now stream the rest:
             while let Some(Ok(packet)) = inbound.next().await {
                 if let Some(peer_tx) = sessions.read().await.get(&packet.target_id.clone().unwrap()) {
-                    // Only send to the one intended recipient
                     let _ = peer_tx.send(Ok(packet.clone())).await;
                 }
             }
 
-            // Clean up on client disconnect
+            // remove from sessions when task ends/disconnects
             sessions.write().await.remove(&client_id.unwrap());
         });
 
-        // Wrap our receiver in a Stream and send it back
+        // send receiver stream back to client they can listen on
         let out_stream = ReceiverStream::new(rx);
         Ok(Response::new(out_stream))
     }
