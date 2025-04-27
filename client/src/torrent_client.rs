@@ -191,21 +191,21 @@ impl TorrentClient {
 
         //todo 1. try connection over local NAT
         
-        let socket = self.socket.take().unwrap();
-        let priv_cert_ip = Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string();
-        let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), priv_cert_ip).await?;
-        p2p_sender.quic_listener().await?;
+        // let socket = self.socket.take().unwrap();
+        // let priv_cert_ip = Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string();
+        // let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), priv_cert_ip).await?;
+        // p2p_sender.quic_listener().await?;
         
         
         //todo 2. try hole punch
         
-        // let socket = self.hole_punch(peer_addr).await?;
-        // println!("Returned value {:?}", socket);
-        // //start quick server
-        // let pub_cert_ip = Ipv4Addr::from(self.self_addr.pub_ipaddr).to_string();
-        // 
-        // let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), pub_cert_ip).await?;
-        // p2p_sender.quic_listener().await?;
+        let socket = self.hole_punch(peer_addr).await?;
+        println!("Returned value {:?}", socket);
+        //start quick server
+        let pub_cert_ip = Ipv4Addr::from(self.self_addr.pub_ipaddr).to_string();
+        
+        let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), pub_cert_ip).await?;
+        p2p_sender.quic_listener().await?;
         //todo 3 TURN 
         
         Ok(())
@@ -229,14 +229,11 @@ impl TorrentClient {
     ///Used when client is requesting a file
     pub async fn get_file_from_peer(&mut self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
 
-        // let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
-        // let port = peer_id.pub_port as u16;
-        // let peer_addr = SocketAddr::from((ip_addr, port));
-        
-        let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
-        let port = peer_id.priv_port as u16;
+        let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
+        let port = peer_id.pub_port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
-       
+        
+
         //todo refactor for final implementation 
         
         //init the map so cert can be retrieved 
@@ -244,8 +241,7 @@ impl TorrentClient {
         server_connection.init_cert_sender(self.self_addr).await?;
         
         
-        // let socket = self.hole_punch(peer_addr).await?;
-        let socket = self.socket.take().unwrap();
+        let socket = self.hole_punch(peer_addr).await?;
         
         let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr,self.server.clone()).await?;
         p2p_conn.connect_to_peer_server(peer_addr).await?;

@@ -25,6 +25,7 @@ message ClientId {
   string uid = 1;
 }
 
+//todo change this so we can make a tcp connection
 message PeerId {
     uint32 ipaddr = 1;
     uint32 port = 2;

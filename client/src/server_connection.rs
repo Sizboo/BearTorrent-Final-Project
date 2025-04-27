@@ -69,10 +69,6 @@ impl ServerConnection {
         //bind port and get public facing id
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
         let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
-        
-        //TEST
-        socket.connect(&stun_server)?;
-        
         let client = StunClient::new(stun_server);
         let external_addr = client.query_external_address(&socket)?;
 
@@ -85,7 +81,9 @@ impl ServerConnection {
         println!("My public PORT {}", external_addr.port());
 
         let local_addr = socket.local_addr()?;
+       
         
+        //todo change this so we can make a tcp connection
         let priv_ipaddr = match local_addr.ip(){
             IpAddr::V4(ip) => Ok(u32::from_be_bytes(ip.octets())),
             IpAddr::V6(ip) => Err("Cannot convert IPv6 to u32"),
