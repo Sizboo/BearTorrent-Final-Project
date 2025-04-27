@@ -26,8 +26,10 @@ message ClientId {
 }
 
 message PeerId {
-    uint32 ipaddr = 1;
-    uint32 port = 2;
+    uint32 pub_ipaddr = 1;
+    uint32 pub_port = 2;
+    uint32 priv_ipaddr = 3;
+    uint32 priv_port = 4;
 }
 
 message FileMessage {

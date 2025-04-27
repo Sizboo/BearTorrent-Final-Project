@@ -41,12 +41,13 @@ impl QuicP2PConn {
         torrent_client: &mut TorrentClient,
         socket: TokioUdpSocket,
         peer_id: PeerId,
-        server: ServerConnection
+        server: ServerConnection,
+        cert_ip: String
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
 
         let (certs, key) = {
             println!("generating self-signed certificate");
-            let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
+            // let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
             let cert = rcgen::generate_simple_self_signed(vec![cert_ip])?;
             let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
             let cert: CertificateDer = cert.cert.into();

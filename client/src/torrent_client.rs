@@ -1,7 +1,7 @@
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use stunclient::StunClient;
-use tokio::net::{UdpSocket};
+use tokio::net::{TcpSocket, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -10,6 +10,7 @@ use connection::{PeerId, ClientId, FileMessage};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::server_connection::ServerConnection;
 use tokio_util::sync::CancellationToken;
+use tonic::transport::Server;
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -18,46 +19,53 @@ pub mod connection {
 
 #[derive(Debug)]
 pub struct TorrentClient {
-    server: ServerConnection,
-    socket: Option<UdpSocket>,
+    pub(crate) server: ServerConnection,
+    pub(crate) socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
 }
 
 impl TorrentClient {
 
-    pub async fn new(server: &mut ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
-
-        //bind port and get public facing id
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-        let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
-        let client = StunClient::new(stun_server);
-        let external_addr = client.query_external_address(&socket)?;
-
-        let ipaddr =  match external_addr.ip() {
-            IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
-            IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
-        }?;
-
-        println!("My public IP {}", external_addr.ip());
-        println!("My public PORT {}", external_addr.port());
-
-        let self_addr = PeerId {
-            ipaddr,
-            port: external_addr.port() as u32,
-        };
-        socket.set_nonblocking(true)?;
-        
-        server.register_server_connection(self_addr.clone()).await?;
-        
-        let server = server.clone();
-        
-        Ok(
-            TorrentClient {
-                server,
-                socket: Some(UdpSocket::try_from(socket)?) ,
-                self_addr,
-            },
-        )
+    // pub async fn new(server: &mut ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
+    //
+    //     //bind port and get public facing id
+    //     let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    //     let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
+    //     let client = StunClient::new(stun_server);
+    //     let external_addr = client.query_external_address(&socket)?;
+    //
+    //     let ipaddr =  match external_addr.ip() {
+    //         IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
+    //         IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
+    //     }?;
+    //
+    //     println!("My public IP {}", external_addr.ip());
+    //     println!("My public PORT {}", external_addr.port());
+    //
+    //     let self_addr = PeerId {
+    //         ipaddr,
+    //         port: external_addr.port() as u32,
+    //     };
+    //     socket.set_nonblocking(true)?;
+    //
+    //     server.register_server_connection(self_addr.clone()).await?;
+    //
+    //     let server = server.clone();
+    //
+    //     Ok(
+    //         TorrentClient {
+    //             server,
+    //             socket: Some(UdpSocket::try_from(socket)?) ,
+    //             self_addr,
+    //         },
+    //     )
+    // }
+    pub fn new(server: ServerConnection, socket: Option<UdpSocket>, self_addr: PeerId) -> Self {
+        TorrentClient{
+            server,
+            socket,
+            self_addr,
+        }
     }
 
 
@@ -137,8 +145,8 @@ impl TorrentClient {
     pub async fn seeding(server: &mut ServerConnection) -> Result<(), Box<dyn std::error::Error>> {
         
         loop {
-            let mut torrent_client = TorrentClient::new(server).await?;
-
+            let mut torrent_client = server.create_client().await?;
+            
             let mut server_client = torrent_client.server.client.clone();
 
             //todo REMOVE THIS and add proper ERROR CHECKING for REAL USE
@@ -175,8 +183,8 @@ impl TorrentClient {
     pub async fn connect_to_peer(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
         let peer_id = res.into_inner();
 
-        let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-        let port = peer_id.port as u16;
+        let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
+        let port = peer_id.pub_port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
         
         println!("peer to send {:?}", peer_id);
@@ -189,7 +197,9 @@ impl TorrentClient {
         let socket = self.hole_punch(peer_addr).await?;
         println!("Returned value {:?}", socket);
         //start quick server
-        let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
+        let cert_ip = Ipv4Addr::from(self.self_addr.pub_ipaddr).to_string();
+
+        let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), cert_ip).await?;
         p2p_sender.quic_listener().await?;
         //todo 3 TURN 
         
@@ -213,8 +223,8 @@ impl TorrentClient {
 
     ///Used when client is requesting a file
     pub async fn get_file_from_peer(&mut self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-        let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-        let port = peer_id.port as u16;
+        let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
+        let port = peer_id.pub_port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
        
         //todo refactor for final implementation 
@@ -226,8 +236,8 @@ impl TorrentClient {
         
         let socket = self.hole_punch(peer_addr).await?;
 
-        let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-        let port = peer_id.port as u16;
+        let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
+        let port = peer_id.pub_port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
         
         let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr,self.server.clone()).await?;

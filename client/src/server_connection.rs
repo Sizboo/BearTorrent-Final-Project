@@ -1,5 +1,10 @@
+use std::net::{IpAddr, ToSocketAddrs};
+// use local_ip_address::local_ip;
+use stunclient::StunClient;
+use tokio::net::UdpSocket;
 use tonic::transport::{Channel, ClientTlsConfig};
 use crate::torrent_client::connection::{PeerId, connector_client::ConnectorClient, ClientId};
+use crate::torrent_client::TorrentClient;
 
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
@@ -57,5 +62,48 @@ impl ServerConnection {
         self.uid = Some(uid.into_inner());
 
         Ok(())
+    }
+
+    pub (crate) async fn create_client(&mut self) -> Result<TorrentClient, Box<dyn std::error::Error>> {
+
+        //bind port and get public facing id
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+        let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
+        let client = StunClient::new(stun_server);
+        let external_addr = client.query_external_address(&socket)?;
+
+        let pub_ipaddr =  match external_addr.ip() {
+            IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
+            IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
+        }?;
+
+        println!("My public IP {}", external_addr.ip());
+        println!("My public PORT {}", external_addr.port());
+
+        let local_addr = socket.local_addr()?;
+        
+        let priv_ipaddr = match local_addr.ip(){
+            IpAddr::V4(ip) => Ok(u32::from_be_bytes(ip.octets())),
+            IpAddr::V6(ip) => Err("Cannot convert IPv6 to u32"),
+        }?;
+        
+        let priv_port = local_addr.port() as u32;
+        
+        let self_addr = PeerId {
+            pub_ipaddr,
+            pub_port: external_addr.port() as u32,
+            priv_ipaddr,
+            priv_port
+
+        };
+        socket.set_nonblocking(true)?;
+
+        self.register_server_connection(self_addr.clone()).await?;
+
+        let server = self.clone();
+
+        Ok(
+            TorrentClient::new(server, Some(UdpSocket::from_std(socket)?), self_addr)
+        )
     }
 }

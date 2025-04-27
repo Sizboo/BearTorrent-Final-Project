@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "r" => {
             println!("Requesting");
             //todo will need have a requesting process like seeding above
-            let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
+            let mut torrent_client = server_conn.create_client().await?;
             
             //todo I really need to change how this is done
             let _ = server_conn.register_server_connection(torrent_client.self_addr);
