@@ -4,9 +4,10 @@ use stunclient::StunClient;
 use tokio::net::{UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::{sleep, timeout};
+use tokio::{time::{sleep, timeout}, sync::mpsc};
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response};
-use connection::{PeerId, ClientId, FileMessage};
+use connection::{PeerId, ClientId, FileMessage, turn_client::TurnClient, TurnPacket};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::server_connection::ServerConnection;
 use tokio_util::sync::CancellationToken;
@@ -14,7 +15,6 @@ use tokio_util::sync::CancellationToken;
 pub mod connection {
     tonic::include_proto!("connection");
 }
-
 
 #[derive(Debug)]
 pub struct TorrentClient {
@@ -191,7 +191,6 @@ impl TorrentClient {
 
 
         //todo 2. try hole punch
-        //hole punch
 
         if let Ok(socket) = self.hole_punch(peer_addr).await {
             println!("Returned value {:?}", socket);
@@ -199,11 +198,19 @@ impl TorrentClient {
             let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
             p2p_sender.quic_listener().await?;
         } else {
-            // TODO implement TURN
+            // TODO implement TURN stuff for sending
+            let client_id = self.server.uid.clone()
+                .expect("server.uid must be set before calling TurnFallback::start");
+
+            let fallback = TurnFallback::start(client_id).await?;
+
+            // TODO need a way to
+            let response = self.server.client.get_client_id(peer_id).await?;
+            let target = response.into_inner();
+            let buf = "data sent over TURN".as_bytes().to_vec();
+            fallback.send_to(target, buf).await?;
         }
 
-        //todo 3 TURN 
-        
         Ok(())
     }
 
@@ -243,7 +250,8 @@ impl TorrentClient {
             let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr,self.server.clone()).await?;
             p2p_conn.connect_to_peer_server(peer_addr).await?;
         } else {
-            // TODO implement TURN
+            // TODO implement TURN for receiving
+
         }
 
         Ok(())
@@ -280,6 +288,67 @@ impl TorrentClient {
         
         Ok(resp.into_inner())
     }
-    
+}
 
+// Holds your client’s TURN bidi‐stream sender and ID.
+pub struct TurnFallback {
+    self_id: ClientId,
+    tx: mpsc::Sender<TurnPacket>,
+}
+
+impl TurnFallback {
+    /// Connects to the TURN server, spawns the inbound‐loop task,
+    /// and returns an object you can use to send packets.
+    pub async fn start(
+        self_id: ClientId,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        // 1) Dial your TURN server
+        let mut client = TurnClient::connect("https://helpful-serf-server-1016068426296.us-south1.run.app:50051")
+            .await?;
+
+        // 2) Create a channel for outbound packets
+        let (tx, rx) = mpsc::channel::<TurnPacket>(128);
+        let outbound = ReceiverStream::new(rx);
+
+        // 3) Start the bi‐directional stream
+        let mut response = client.relay(Request::new(outbound)).await?;
+        let mut inbound = response.into_inner();
+
+        // 4) Send the “hello” packet with your own ID
+        let init = TurnPacket {
+            client_id: Some(self_id.clone()),
+            target_id: None,
+            payload: Vec::new(),
+        };
+        tx.send(init).await?;
+
+        // 5) Spawn a task to handle incoming packets
+        tokio::spawn(async move {
+            while let Some(Ok(pkt)) = inbound.next().await {
+                // pkt.client_id is the peer who sent this
+                let from = pkt.client_id.clone().unwrap();
+                let data = pkt.payload;
+                // TODO: call your existing handler, e.g.
+                // handle_turn_payload(from, data).await;
+            }
+        });
+
+        // Now return an instance you can use to send via TURN:
+        Ok(TurnFallback { self_id, tx })
+    }
+
+    pub async fn send_to(
+        &self,
+        target_id: ClientId,
+        buf: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pkt = TurnPacket {
+            client_id: Some(self.self_id.clone()),
+            target_id: Some(target_id.clone()),
+            payload: buf,
+        };
+        // enqueue it onto the outbound channel
+        self.tx.send(pkt).await?;
+        Ok(())
+    }
 }

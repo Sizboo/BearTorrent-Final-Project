@@ -7,6 +7,8 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use crate::connection::{Cert, CertMessage, ClientId};
+use crate::connection::turn_server::TurnServer;
+use crate::turn::TurnService;
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -27,6 +29,10 @@ pub struct ConnectionService {
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
 }
+
+impl ConnectionService {
+}
+
 
 #[tonic::async_trait]
 impl Connector for ConnectionService {
@@ -211,18 +217,42 @@ impl Connector for ConnectionService {
         Ok(Response::new(()))
     }
 
+    async fn get_client_id(
+        &self,
+        request: Request<PeerId>,
+    ) -> Result<Response<ClientId>, Status> {
+        let peer = request.into_inner();
+
+        let registry = self.client_registry.read().await;
+
+        let client_id = registry
+            .iter()
+            .find_map(|(client_id, saved_peer)| {
+                if saved_peer == &peer {
+                    Some(client_id.clone())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| Status::not_found("No client registered for that peer"))?;
+
+        Ok(Response::new(client_id))
+    }
 }
 
 
-
+        
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let address = format!("0.0.0.0:{}", port).parse()?;
+    
     let connection_service = ConnectionService::default();
-
+    let turn_service = TurnService::default();
+    
     Server::builder()
         .add_service(ConnectorServer::new(connection_service))
+        .add_service(TurnServer::new(turn_service))
         .serve(address)
         .await?;
 
