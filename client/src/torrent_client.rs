@@ -251,6 +251,10 @@ impl TorrentClient {
             p2p_conn.connect_to_peer_server(peer_addr).await?;
         } else {
             // TODO implement TURN for receiving
+            let client_id = self.server.uid.clone()
+                .expect("server.uid must be set before calling TurnFallback::start");
+
+            let fallback = TurnFallback::start(client_id).await?;
 
         }
 
@@ -290,31 +294,26 @@ impl TorrentClient {
     }
 }
 
-// Holds your client’s TURN bidi‐stream sender and ID.
 pub struct TurnFallback {
     self_id: ClientId,
     tx: mpsc::Sender<TurnPacket>,
 }
 
 impl TurnFallback {
-    /// Connects to the TURN server, spawns the inbound‐loop task,
-    /// and returns an object you can use to send packets.
     pub async fn start(
         self_id: ClientId,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // 1) Dial your TURN server
+
+        // connect to server
         let mut client = TurnClient::connect("https://helpful-serf-server-1016068426296.us-south1.run.app:50051")
             .await?;
 
-        // 2) Create a channel for outbound packets
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
-        // 3) Start the bi‐directional stream
         let mut response = client.relay(Request::new(outbound)).await?;
         let mut inbound = response.into_inner();
 
-        // 4) Send the “hello” packet with your own ID
         let init = TurnPacket {
             client_id: Some(self_id.clone()),
             target_id: None,
@@ -322,14 +321,12 @@ impl TurnFallback {
         };
         tx.send(init).await?;
 
-        // 5) Spawn a task to handle incoming packets
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
                 // pkt.client_id is the peer who sent this
                 let from = pkt.client_id.clone().unwrap();
                 let data = pkt.payload;
-                // TODO: call your existing handler, e.g.
-                // handle_turn_payload(from, data).await;
+                println!("got {} bytes from {:?}", data.len(), from);
             }
         });
 
@@ -347,7 +344,7 @@ impl TurnFallback {
             target_id: Some(target_id.clone()),
             payload: buf,
         };
-        // enqueue it onto the outbound channel
+
         self.tx.send(pkt).await?;
         Ok(())
     }
