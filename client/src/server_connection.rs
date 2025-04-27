@@ -69,6 +69,10 @@ impl ServerConnection {
         //bind port and get public facing id
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
         let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
+        
+        //TEST
+        socket.connect(&stun_server)?;
+        
         let client = StunClient::new(stun_server);
         let external_addr = client.query_external_address(&socket)?;
 
@@ -88,6 +92,9 @@ impl ServerConnection {
         }?;
         
         let priv_port = local_addr.port() as u32;
+
+        println!("My private IP {}", local_addr.ip());
+        println!("My private PORT {}", priv_port);
         
         let self_addr = PeerId {
             pub_ipaddr,
