@@ -165,9 +165,7 @@ impl QuicP2PConn {
 
     pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr)
     -> Result<(), Box<dyn std::error::Error>> {
-        println!("Connecting to {:?}", peer_addr);
         let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
-        println!("Connected to {:?}", conn);
         let read_task = tokio::spawn(async move {
             let res = QuicP2PConn::recv_data(conn).await;
             if res.is_err() {
