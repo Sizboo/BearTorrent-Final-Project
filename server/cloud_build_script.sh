@@ -1,4 +1,4 @@
-c# 1. build docker:
+# 1. build docker:
 docker build -t gcr.io/peerless-bond-456618-r8/server_image:latest .
 
 # 2. push image to container registry

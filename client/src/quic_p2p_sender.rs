@@ -1,16 +1,13 @@
-use std::{error, fs};
-use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Connection, Endpoint, TokioRuntime};
-use quinn::Side::Server;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::server_connection::ServerConnection;
-use crate::torrent_client::{connection, TorrentClient};
+use crate::torrent_client::TorrentClient;
+use crate::connection::connection::{PeerId, CertMessage, Cert};
 use tokio::net::UdpSocket as TokioUdpSocket;
 use tonic::Request;
-use connection::{CertMessage, PeerId, Cert};
 
 pub struct QuicP2PConn {
     endpoint: Endpoint,
@@ -41,12 +38,13 @@ impl QuicP2PConn {
         torrent_client: &mut TorrentClient,
         socket: TokioUdpSocket,
         peer_id: PeerId,
-        server: ServerConnection
+        server: ServerConnection,
+        cert_ip: String
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
 
         let (certs, key) = {
             println!("generating self-signed certificate");
-            let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
+            // let cert_ip = Ipv4Addr::from(torrent_client.self_addr.ipaddr).to_string();
             let cert = rcgen::generate_simple_self_signed(vec![cert_ip])?;
             let key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
             let cert: CertificateDer = cert.cert.into();
@@ -57,7 +55,7 @@ impl QuicP2PConn {
         //send certificate to client here
         let cert_bytes = certs[0].to_vec();
         let mut server_connection = server.client.clone();
-        let request = Request::new( connection::CertMessage{
+        let request = Request::new( CertMessage{
             peer_id: Some(peer_id),
             cert: Some(Cert { certificate: cert_bytes }),
         });
@@ -65,8 +63,6 @@ impl QuicP2PConn {
 
 
         let res = server_connection.send_cert(request).await?;
-        println!("Self Signed send response {:?}", res);
-
 
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
@@ -78,7 +74,7 @@ impl QuicP2PConn {
 
         let server_config = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
 
-        //todo consider setting max-uni-streams if thats necessary for us (control security)
+        //todo consider setting max-uni-streams if that's necessary for us (control security)
         // let socket = socket_arc.take().into();
 
         let endpoint = Endpoint::new(
@@ -139,9 +135,9 @@ impl QuicP2PConn {
     pub(crate) async fn quic_listener(&self)
     -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
-
+        println!("Listening on {:?}", self.endpoint.local_addr());
         let conn = conn_listener.await?;
-        
+        println!("Connection received on {:?}", self.endpoint.local_addr());
         let send_task = tokio::spawn(async move {
             let res = QuicP2PConn::send_data(conn).await;
             if res.is_err() {
@@ -170,7 +166,6 @@ impl QuicP2PConn {
     pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr)
     -> Result<(), Box<dyn std::error::Error>> {
         let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
-
         let read_task = tokio::spawn(async move {
             let res = QuicP2PConn::recv_data(conn).await;
             if res.is_err() {

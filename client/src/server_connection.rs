@@ -1,9 +1,10 @@
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::torrent_client::connection::{PeerId, connector_client::ConnectorClient, ClientId};
+use crate::connection::connection::{connector_client, turn_client, ClientId, PeerId};
 
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
-    pub(crate) client: ConnectorClient<Channel>,
+    pub(crate) client: connector_client::ConnectorClient<Channel>,
+    pub(crate) turn: turn_client::TurnClient<Channel>,
     pub(crate) uid: Option<ClientId>,
 }
 
@@ -20,7 +21,8 @@ impl ServerConnection {
         let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
             .connect().await?;
 
-        let client = ConnectorClient::new(endpoint);
+        let client = connector_client::ConnectorClient::new(endpoint.clone());
+        let turn = turn_client::TurnClient::new(endpoint);
 
         //todo use this to figure out id persistence across sessions
         //1. get uuid
@@ -47,6 +49,7 @@ impl ServerConnection {
         Ok(
             ServerConnection {
                 client,
+                turn,
                 uid: None,
             }
         )
