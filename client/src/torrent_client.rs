@@ -293,25 +293,22 @@ impl TorrentClient {
     }
 }
 
+
+// we will use this to manage TURN if we need it as a fallback
 pub struct TurnFallback {
     self_id: ClientId,
     tx: mpsc::Sender<TurnPacket>,
 }
 
 impl TurnFallback {
-    /// take ownership of a TurnClient (cloned from ServerConnection) plus your own ID
     pub async fn start(
-        mut client: TurnClient<Channel>,
+        mut client: TurnClient<Channel>, // TorrentClient.server.turn
         self_id: ClientId,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
-        // open the bi-di relay stream
-        let mut resp = client.relay(Request::new(outbound)).await?;
-        let mut inbound = resp.into_inner();
-
-        // send the “hello, this is me” packet
+        // send our initial packet so we are registered with the TurnService
         let init = TurnPacket {
             client_id: Some(self_id.clone()),
             target_id: None,
@@ -319,15 +316,24 @@ impl TurnFallback {
         };
         tx.send(init).await?;
 
-        // spawn your listener
+        // by the nature of streams, it is easier to set up bidirectional communication and have
+        // both sending and receiving use the same relay setup code...
+        // it might be helpful later on... or not idk, but we have it lol
+
+        // get our inbound data stream
+        let mut resp = client.relay(Request::new(outbound)).await?;
+        let mut inbound = resp.into_inner();
+
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
                 let from = pkt.client_id.unwrap();
+
+                // TODO pass off pkt.data to data handler when we make one
                 println!("TURN got {} bytes from {:?}", pkt.payload.len(), from);
-                // …do something with pkt.payload…
             }
         });
 
+        // return our TurnFallback so we can send through it
         Ok(TurnFallback { self_id, tx })
     }
 
@@ -336,11 +342,15 @@ impl TurnFallback {
         target_id: ClientId,
         buf: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+
+        // assemble packet
         let pkt = TurnPacket {
             client_id: Some(self.self_id.clone()),
             target_id: Some(target_id),
             payload: buf,
         };
+
+        // send via out sending stream
         self.tx.send(pkt).await?;
         Ok(())
     }
