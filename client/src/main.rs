@@ -1,6 +1,8 @@
 mod torrent_client;
 mod server_connection;
 mod quic_p2p_sender;
+mod turn_fallback;
+
 use torrent_client::TorrentClient;
 
 use crate::server_connection::ServerConnection;
