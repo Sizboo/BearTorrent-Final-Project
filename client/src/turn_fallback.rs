@@ -7,15 +7,11 @@ use std::time::Duration;
 use tokio::{time::{sleep, timeout}, sync::mpsc};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, transport::Channel};
-use connection::{PeerId, ClientId, FileMessage, turn_client::TurnClient, TurnPacket};
+use crate::connection::connection::*;
 use crate::quic_p2p_sender::QuicP2PConn;
-use crate::turn_fallback::TurnFallback;
 use crate::server_connection::ServerConnection;
 use tokio_util::sync::CancellationToken;
 
-pub mod connection {
-    tonic::include_proto!("connection");
-}
 
 // we will use this to manage TURN if we need it as a fallback
 pub struct TurnFallback {
@@ -25,7 +21,7 @@ pub struct TurnFallback {
 
 impl TurnFallback {
     pub async fn start(
-        mut client: TurnClient<Channel>, // TorrentClient.server.turn
+        mut client: turn_client::TurnClient<Channel>, // TorrentClient.server.turn
         self_id: ClientId,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);

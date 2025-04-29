@@ -2,14 +2,12 @@ mod torrent_client;
 mod server_connection;
 mod quic_p2p_sender;
 mod turn_fallback;
+mod connection;
 
 use torrent_client::TorrentClient;
 
 use crate::server_connection::ServerConnection;
 
-pub mod connection {
-    tonic::include_proto!("connection");
-}
 
 
 #[tokio::main]

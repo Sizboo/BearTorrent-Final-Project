@@ -7,15 +7,11 @@ use std::time::Duration;
 use tokio::{time::{sleep, timeout}, sync::mpsc};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, transport::Channel};
-use connection::{PeerId, ClientId, FileMessage, turn_client::TurnClient, TurnPacket};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::turn_fallback::TurnFallback;
 use crate::server_connection::ServerConnection;
+use crate::connection::connection::*;
 use tokio_util::sync::CancellationToken;
-
-pub mod connection {
-    tonic::include_proto!("connection");
-}
 
 #[derive(Debug)]
 pub struct TorrentClient {
@@ -200,11 +196,11 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&self, client_id: ClientId , file_hash: u32) -> Result<connection::PeerList, Box<dyn std::error::Error>> {
+    pub async fn file_request(&self, client_id: ClientId , file_hash: u32) -> Result<PeerList, Box<dyn std::error::Error>> {
         let mut client = self.server.client.clone();
         
         
-        let request = Request::new(connection::FileMessage {
+        let request = Request::new(FileMessage {
             id: Some(client_id),
             info_hash: file_hash,
         });
@@ -270,7 +266,7 @@ impl TorrentClient {
         let mut client = self.server.client.clone();
         
         //todo make hash active
-        let request = Request::new(connection::FileMessage {
+        let request = Request::new(FileMessage {
             id: Some(client_id),
             info_hash: 12345,
         });
