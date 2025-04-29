@@ -83,15 +83,15 @@ impl TorrentClient {
     async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
         let socket = Arc::new(self.pub_socket.take().unwrap());
         let cancel = CancellationToken::new();
+        let s_recv = socket.clone();
 
         println!("Starting Send to peer ip: {}, port: {}", peer_addr.ip(), peer_addr.port());
 
         {
-            let s_send = socket.clone();
             let c_send = cancel.clone();
             tokio::spawn(async move {
                 for _ in 0..200 {
-                    if let Err(e) = s_send.send_to(b"HELPFUL_SERF", peer_addr).await {
+                    if let Err(e) = socket.send_to(b"HELPFUL_SERF", peer_addr).await {
                         eprintln!("hole_punch send error: {}", e);
                     }
                     // if we get cancelled by the receive, stop sending early
@@ -105,7 +105,6 @@ impl TorrentClient {
         }
 
         let recv_task = {
-            let s_recv = socket.clone();
             let c_recv = cancel.clone();
             async move {
                 let mut buf = [0u8; 1024];
