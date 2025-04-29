@@ -203,7 +203,7 @@ impl TorrentClient {
         if let Ok(socket) = self.hole_punch(peer_addr).await {
             println!("Returned value {:?}", socket);
             //start quick server
-            let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.pub_ipaddr.to_string()).to_string()).await?;
+            let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.pub_ipaddr).to_string()).await?;
             p2p_sender.quic_listener().await?;
         } else {
             // TURN for sending here
