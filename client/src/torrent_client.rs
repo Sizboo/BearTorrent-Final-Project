@@ -62,79 +62,64 @@ impl TorrentClient {
 
 
     async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
-        
-        //todo maybe don't take this here
-        let socket_arc = Arc::new(self.socket.take().unwrap());
-        let socket_clone = socket_arc.clone();
-        let cancel_token = CancellationToken::new();
-        let token_clone = cancel_token.clone();
-
-        let punch_string = b"HELPFUL_SERF";
+        let socket = Arc::new(self.socket.take().unwrap());
+        let cancel = CancellationToken::new();
 
         println!("Starting Send to peer ip: {}, port: {}", peer_addr.ip(), peer_addr.port());
-        
-        let send_task = tokio::spawn(async move {
-            for i in 0..50 {
-                let res = socket_arc.send_to(punch_string, peer_addr).await;
-                
-                if res.is_err() {
-                    println!("Send Failed: {}", res.err().unwrap());
-                }
-                
-                if token_clone.is_cancelled() {
-                    println!("Send Cancelled");
-                    return Ok(socket_arc);
-                }
-                
-                sleep(Duration::from_millis(10)).await;
-            }
-            Err(Box::<dyn std::error::Error + Send + Sync>::from("send task finished without succeeding"))
-        });
 
-        // made this a future instead of spawning it directly
-        let read_task = async move {
-            let mut recv_buf = [0u8; 1024];
-            loop {
-                match socket_clone.recv_from(&mut recv_buf).await {
-                    Ok((n, src)) => {
-                        println!("Received from {}: {:?}", src, &recv_buf[..n]);
-                        if &recv_buf[..n] == punch_string {
-                            // println!("Punched SUCCESS {}", src);
-                            
-                            cancel_token.cancel();
-                            drop(socket_clone);
-                            return Ok(());
-                        }
+        {
+            let s_send = socket.clone();
+            let c_send = cancel.clone();
+            tokio::spawn(async move {
+                for _ in 0..50 {
+                    if let Err(e) = s_send.send_to(b"HELPFUL_SERF", peer_addr).await {
+                        eprintln!("hole_punch send error: {}", e);
                     }
-                    Err(e) => {
-                        eprintln!("Recv error: {}", e);
-                        return Err(Box::<dyn std::error::Error + Send + Sync>::from(e));
-                    },
+                    // if we get cancelled by the receive, stop sending early
+                    if c_send.is_cancelled() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                // once this loop finishes or is cancelled, task simply ends
+            });
+        }
+
+        let recv_task = {
+            let s_recv = socket.clone();
+            let c_recv = cancel.clone();
+            async move {
+                let mut buf = [0u8; 1024];
+                loop {
+                    let (n, src) = s_recv.recv_from(&mut buf).await?;
+                    if &buf[..n] == b"HELPFUL_SERF" {
+                        // signal send‐task to stop
+                        c_recv.cancel();
+                        drop(s_recv);
+                        return Ok(()) as Result<(), Box<dyn std::error::Error + Send + Sync>>;
+                    }
                 }
             }
         };
 
-        let socket_arc = match send_task.await {
-            Ok(Ok(socket)) => socket,
-            Ok(Err(e)) => return Err(e),
-            Err(join_err) => return Err(Box::new(join_err)),
-        };
-
-        // spawn read task here with a timeout of 5 seconds
-        // that's how I'm checking if the punch fails, and revert to TURN
-        let read_res = timeout(Duration::from_secs(5), read_task).await;
-        match read_res {
-            Ok(inner) => match inner {
-                Ok(_) => {
-                    let socket = Arc::try_unwrap(socket_arc).unwrap();
-                    println!("Punch Success: {:?}", socket);
-                    Ok(socket)
-                }
-                Err(e) => Err(e),
-            },
+        match tokio::time::timeout(Duration::from_secs(5), recv_task).await {
+            Ok(Ok(())) => {
+                // got a punch back in time
+                let socket = Arc::try_unwrap(socket).unwrap();
+                println!("Punch succeeded!");
+                Ok(socket)
+            }
+            Ok(Err(e)) => {
+                // some I/O error in recv
+                Err(e)
+            }
             Err(_) => {
-                println!("Punch timeout after 5 seconds.");
-                Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out")))
+                // receive‐loop timed out
+                eprintln!("hole punch timed out; falling back to TURN");
+                Err(Box::new(std::io::Error::new(
+                    ErrorKind::TimedOut,
+                    "hole punch timed out",
+                )))
             }
         }
     }
@@ -198,6 +183,7 @@ impl TorrentClient {
             p2p_sender.quic_listener().await?;
         } else {
             // TODO implement TURN stuff for sending
+            println!("reached TURN else block");
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 
@@ -250,6 +236,7 @@ impl TorrentClient {
             p2p_conn.connect_to_peer_server(peer_addr).await?;
         } else {
             // TODO implement TURN for receiving
+            println!("reached TURN else block");
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 

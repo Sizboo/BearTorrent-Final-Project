@@ -20,6 +20,7 @@ impl Turn for TurnService {
         (&self,
         request: Request<Streaming<TurnPacket>>
     ) -> Result<Response<Self::RelayStream>, Status> {
+        println!("relay called");
         let mut inbound = request.into_inner();
 
         // get initial TurnPacket to register client
@@ -28,6 +29,7 @@ impl Turn for TurnService {
             .await?
             .ok_or_else(|| Status::invalid_argument("expected initial TurnPacket"))?;
         let client_id = first.client_id.clone();
+        println!("{:?}", first.payload);
 
         let (tx, rx) = mpsc::channel::<Result<TurnPacket, Status>>(128);
 
