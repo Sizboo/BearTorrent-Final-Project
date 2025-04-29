@@ -5,7 +5,7 @@ use quinn::{Connection, Endpoint, TokioRuntime};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::server_connection::ServerConnection;
 use crate::torrent_client::TorrentClient;
-use crate::connection::connection::*;
+use crate::connection::connection::{PeerId, CertMessage, Cert};
 use tokio::net::UdpSocket as TokioUdpSocket;
 use tonic::Request;
 
