@@ -195,6 +195,7 @@ impl TorrentClient {
             //start quick server
             let socket = self.priv_socket.take().unwrap();
             let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), self.self_addr.priv_ipaddr.to_string()).await?;
+            println!("P2P endpoint created successfully");
             p2p_sender.quic_listener().await?;
         }
 

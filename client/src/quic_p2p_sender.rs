@@ -63,8 +63,6 @@ impl QuicP2PConn {
 
 
         let res = server_connection.send_cert(request).await?;
-        println!("Self Signed send response {:?}", res);
-
 
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
