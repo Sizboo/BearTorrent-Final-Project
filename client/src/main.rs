@@ -1,7 +1,6 @@
 mod torrent_client;
 mod server_connection;
 mod quic_p2p_sender;
-
 use torrent_client::TorrentClient;
 
 use crate::server_connection::ServerConnection;
@@ -29,13 +28,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "s" => {
             println!("Seeding");
 
-            TorrentClient::seeding(&mut server_conn).await.unwrap();
+            let mut server_clone = server_conn.clone();
+            let seeding = tokio::spawn( async move {
+                TorrentClient::seeding(&mut server_clone).await.unwrap();
+            });
+
+            seeding.await.expect("seeding broken");
         }
         "r" => {
             println!("Requesting");
             //todo will need have a requesting process like seeding above
             let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
-            
+
             //todo I really need to change how this is done
             let _ = server_conn.register_server_connection(torrent_client.self_addr);
 
@@ -52,6 +56,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
 
-Ok(())
+    Ok(())
 
 }

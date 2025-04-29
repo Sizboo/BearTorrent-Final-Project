@@ -61,7 +61,7 @@ impl TorrentClient {
     }
 
 
-    async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error>> {
+    async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
         
         //todo maybe don't take this here
         let socket_arc = Arc::new(self.socket.take().unwrap());
@@ -137,7 +137,6 @@ impl TorrentClient {
                 Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out")))
             }
         }
-
     }
 
     ///seeding is used as a listening process to begin sending data upon request
