@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::{time::{sleep, timeout}, sync::mpsc};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tonic::{Request, Response};
+use tonic::{Request, Response, transport::Channel};
 use connection::{PeerId, ClientId, FileMessage, turn_client::TurnClient, TurnPacket};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::server_connection::ServerConnection;
@@ -202,7 +202,7 @@ impl TorrentClient {
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 
-            let fallback = TurnFallback::start(client_id).await?;
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id).await?;
 
             // TODO need a way to
             let response = self.server.client.get_client_id(peer_id).await?;
@@ -254,7 +254,7 @@ impl TorrentClient {
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 
-            let fallback = TurnFallback::start(client_id).await?;
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id).await?;
 
         }
 
@@ -300,24 +300,19 @@ pub struct TurnFallback {
 }
 
 impl TurnFallback {
+    /// take ownership of a TurnClient (cloned from ServerConnection) plus your own ID
     pub async fn start(
+        mut client: TurnClient<Channel>,
         self_id: ClientId,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-
-        // connect to server
-        // TODO ask ben how to do this right
-        let mut client = TurnClient::connect("https://helpful-serf-server-1016068426296.us-south1.run.app:50051")
-            .await?;
-
-        // channels and make a stream
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
-        // get inbound stream
-        let mut response = client.relay(Request::new(outbound)).await?;
-        let mut inbound = response.into_inner();
+        // open the bi-di relay stream
+        let mut resp = client.relay(Request::new(outbound)).await?;
+        let mut inbound = resp.into_inner();
 
-        // initial packet to be added to TURN sessions
+        // send the “hello, this is me” packet
         let init = TurnPacket {
             client_id: Some(self_id.clone()),
             target_id: None,
@@ -325,17 +320,15 @@ impl TurnFallback {
         };
         tx.send(init).await?;
 
-        // spawn receiving task to listen for inbound packets
+        // spawn your listener
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
-                // pkt.client_id is the peer who sent this
-                let from = pkt.client_id.clone().unwrap();
-                let data = pkt.payload;
-                println!("got {} bytes from {:?}", data.len(), from);
+                let from = pkt.client_id.unwrap();
+                println!("TURN got {} bytes from {:?}", pkt.payload.len(), from);
+                // …do something with pkt.payload…
             }
         });
 
-        // return tx we can use to send
         Ok(TurnFallback { self_id, tx })
     }
 
@@ -344,14 +337,11 @@ impl TurnFallback {
         target_id: ClientId,
         buf: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // create TurnPacket to send
         let pkt = TurnPacket {
             client_id: Some(self.self_id.clone()),
-            target_id: Some(target_id.clone()),
+            target_id: Some(target_id),
             payload: buf,
         };
-
-        // send packet
         self.tx.send(pkt).await?;
         Ok(())
     }
