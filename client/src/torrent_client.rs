@@ -49,18 +49,18 @@ impl TorrentClient {
             }
             Err(err) => return Err(Box::new(err)),
         };
-        
+
         let priv_port = 50000;
-        
+
         println!("My private IP {:?}", priv_ipaddr);
         println!("My private port is {}", priv_port);
-        
+
         let priv_socket = UdpSocket::bind(SocketAddrV4::new(priv_ipaddr, priv_port)).await?;
-        
+
         let self_addr = PeerId {
             pub_ipaddr,
             pub_port: external_addr.port() as u32,
-            priv_ipaddr: u32::from(priv_ipaddr).to_be(),
+            priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
             priv_port: priv_port as u32,
         };
         socket.set_nonblocking(true)?;
@@ -186,7 +186,7 @@ impl TorrentClient {
         let pub_port = peer_id.pub_port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
 
-        
+
         println!("peer to send {:?}", peer_id);
 
         //todo 1. try connection over local NAT
@@ -246,18 +246,18 @@ impl TorrentClient {
        
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
-        
-        //todo refactor for final implementation 
+
+        //todo refactor for final implementation
         if self.self_addr.pub_ipaddr == peer_id.pub_ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
             let port = peer_id.priv_port as u16;
             let lan_peer_addr = SocketAddr::from((ip_addr, port));
             let priv_socket = self.priv_socket.take().unwrap();
-            
+
             let p2p_conn = QuicP2PConn::create_quic_client(priv_socket, self.self_addr, self.server.clone()).await?;
             p2p_conn.connect_to_peer_server(lan_peer_addr).await?;
         }
-        
+
             //init the map so cert can be retrieved
 
         if let Ok(socket) = self.hole_punch(peer_addr).await {
