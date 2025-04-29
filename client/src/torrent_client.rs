@@ -104,18 +104,17 @@ impl TorrentClient {
 
         match tokio::time::timeout(Duration::from_secs(5), recv_task).await {
             Ok(Ok(())) => {
-                // got a punch back in time
+                // got a successful punch
                 let socket = Arc::try_unwrap(socket).unwrap();
                 println!("Punch succeeded!");
                 Ok(socket)
             }
             Ok(Err(e)) => {
-                // some I/O error in recv
                 Err(e)
             }
             Err(_) => {
-                // receive‐loop timed out
-                eprintln!("hole punch timed out; falling back to TURN");
+                // receiving loop timed out
+                eprintln!("hole punch timed out, falling back to TURN");
                 Err(Box::new(std::io::Error::new(
                     ErrorKind::TimedOut,
                     "hole punch timed out",
@@ -182,17 +181,17 @@ impl TorrentClient {
             let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone()).await?;
             p2p_sender.quic_listener().await?;
         } else {
-            // TODO implement TURN stuff for sending
-            println!("reached TURN else block");
+            // TURN for sending here
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id).await?;
 
-            // TODO need a way to
             let response = self.server.client.get_client_id(peer_id).await?;
             let target = response.into_inner();
             let buf = "data sent over TURN".as_bytes().to_vec();
+
+            tokio::time::sleep(Duration::from_millis(1000)).await;
             fallback.send_to(target, buf).await?;
         }
 
@@ -235,13 +234,14 @@ impl TorrentClient {
             let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr,self.server.clone()).await?;
             p2p_conn.connect_to_peer_server(peer_addr).await?;
         } else {
-            // TODO implement TURN for receiving
-            println!("reached TURN else block");
+            // TURN for receiving here
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id).await?;
 
+            // TODO remove... just needed to have this to keep the program open long enough to receive data
+            tokio::time::sleep(Duration::from_millis(10000)).await;
         }
 
         Ok(())
@@ -316,7 +316,8 @@ impl TurnFallback {
                 let from = pkt.client_id.unwrap();
 
                 // TODO pass off pkt.data to data handler when we make one
-                println!("TURN got {} bytes from {:?}", pkt.payload.len(), from);
+                let payload = String::from_utf8_lossy(&pkt.payload);
+                println!("from = {}, payload = {}", from.uid, payload);
             }
         });
 
