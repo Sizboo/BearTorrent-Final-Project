@@ -1,16 +1,13 @@
-use std::{error, fs};
-use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Connection, Endpoint, TokioRuntime};
-use quinn::Side::Server;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::server_connection::ServerConnection;
-use crate::torrent_client::{connection, TorrentClient};
+use crate::torrent_client::TorrentClient;
+use crate::connection::connection::{PeerId, CertMessage, Cert};
 use tokio::net::UdpSocket as TokioUdpSocket;
 use tonic::Request;
-use connection::{CertMessage, PeerId, Cert};
 
 pub struct QuicP2PConn {
     endpoint: Endpoint,
@@ -58,7 +55,7 @@ impl QuicP2PConn {
         //send certificate to client here
         let cert_bytes = certs[0].to_vec();
         let mut server_connection = server.client.clone();
-        let request = Request::new( connection::CertMessage{
+        let request = Request::new( CertMessage{
             peer_id: Some(peer_id),
             cert: Some(Cert { certificate: cert_bytes }),
         });
@@ -79,7 +76,7 @@ impl QuicP2PConn {
 
         let server_config = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
 
-        //todo consider setting max-uni-streams if thats necessary for us (control security)
+        //todo consider setting max-uni-streams if that's necessary for us (control security)
         // let socket = socket_arc.take().into();
 
         let endpoint = Endpoint::new(

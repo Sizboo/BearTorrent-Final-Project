@@ -1,10 +1,14 @@
-use std::{env, collections::HashMap, net::{IpAddr, SocketAddr, Ipv4Addr}, sync::Arc};
-use tonic::{transport::Server, Code, Request, Response, Status, Streaming};
-use connection::{PeerId, PeerList, FileMessage, TurnPair, connector_server::{Connector, ConnectorServer}, turn_server::Turn};
-use tokio::{sync::{Mutex, mpsc}, net::UdpSocket};
+mod turn;
+
+use std::{env, collections::HashMap, sync::Arc};
+use tonic::{transport::Server, Code, Request, Response, Status};
+use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
+use tokio::sync::{Mutex, mpsc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use crate::connection::{Cert, CertMessage, ClientId};
+use crate::connection::turn_server::TurnServer;
+use crate::turn::TurnService;
 
 pub mod connection {
     tonic::include_proto!("connection");
@@ -25,6 +29,10 @@ pub struct ConnectionService {
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
 }
+
+impl ConnectionService {
+}
+
 
 #[tonic::async_trait]
 impl Connector for ConnectionService {
@@ -123,7 +131,7 @@ impl Connector for ConnectionService {
         request: Request<PeerId>,
     ) -> Result<Response<ClientId>, Status> {
         
-        let mut uid = ClientId { uid: "".to_string() };
+        let mut uid;
         
         loop {
             let uuid = Uuid::new_v4();
@@ -209,81 +217,44 @@ impl Connector for ConnectionService {
         Ok(Response::new(()))
     }
 
+    async fn get_client_id(
+        &self,
+        request: Request<PeerId>,
+    ) -> Result<Response<ClientId>, Status> {
+        let peer = request.into_inner();
+
+        let registry = self.client_registry.read().await;
+
+        let client_id = registry
+            .iter()
+            .find_map(|(client_id, saved_peer)| {
+                if saved_peer == &peer {
+                    Some(client_id.clone())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| Status::not_found("No client registered for that peer"))?;
+
+        Ok(Response::new(client_id))
+    }
 }
 
 
-
+        
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let address = format!("0.0.0.0:{}", port).parse()?;
+    
     let connection_service = ConnectionService::default();
-
+    let turn_service = TurnService::default();
+    
     Server::builder()
         .add_service(ConnectorServer::new(connection_service))
+        .add_service(TurnServer::new(turn_service))
         .serve(address)
         .await?;
 
     Ok(())
-}
-
-
-
-type RelayKey = (SocketAddr, SocketAddr);
-
-pub struct TurnService {}
-
-impl TurnService {
-    async fn relay_loop (
-        socket: Arc<UdpSocket>,
-        from: SocketAddr,
-        to: SocketAddr,
-    ) {
-        let mut buf = [0u8; 1500];
-
-        loop {
-            match socket.recv_from(&mut buf).await {
-                Ok((n, src)) => {
-                    if src == from {
-                        if let Err(e) = socket.send_to(&buf[..n], to).await {
-                            eprintln!("Error sending to {}: {}", to, e);
-                        }
-                    } else {
-                        eprintln!("Unexpected source: expected {}, got {}", from, src);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error receiving from {}: {}", from, e);
-                    break;
-                }
-            }
-        }
-    }
-}
-
-#[tonic::async_trait]
-impl Turn for TurnService {
-    async fn establish_relay(
-        &self,
-        request: Request<TurnPair>,
-    ) -> Result<Response<()>, Status> {
-        let pair = request.into_inner();
-
-        let sender = pair.sender.ok_or_else(|| Status::invalid_argument("missing sender"))?;
-        let receiver = pair.receiver.ok_or_else(|| Status::invalid_argument("missing receiver"))?;
-
-        let sender_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(sender.ipaddr)), sender.port as u16);
-        let receiver_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(receiver.ipaddr)), receiver.port as u16);
-
-        let socket = UdpSocket::bind("0.0.0.0:0").await
-            .map_err(|e| Status::internal(format!("Socket bind failed: {e}")))?;
-
-        let socket = Arc::new(socket);
-        let socket_sender = socket.clone();
-        let socket_receiver = socket.clone();
-
-        tokio::spawn(TurnService::relay_loop(socket_sender, sender_addr, receiver_addr));
-
-        Ok(Response::new(()))
-    }
 }
