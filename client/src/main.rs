@@ -3,6 +3,7 @@ mod server_connection;
 mod quic_p2p_sender;
 mod turn_fallback;
 mod connection;
+mod file_handler;
 
 use torrent_client::TorrentClient;
 
