@@ -4,7 +4,8 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 // This function generates the info hash of a given file.
-// Client files will be located in client/resources
+// Client files will be located in client/resources.
+// Returns: u32 file hash
 fn hash_file_u32<P: AsRef<Path>>(path: P) -> std::io::Result<u32> {
     let mut hasher = Sha1::new();
     let mut file = BufReader::new(File::open(path)?);
@@ -29,8 +30,9 @@ fn hash_file_u32<P: AsRef<Path>>(path: P) -> std::io::Result<u32> {
 // Returns: Vec<u32>
 pub(crate) fn get_file_hashes() -> std::io::Result<Vec<u32>> {
     let mut results = vec![];
-    // Get the path of the client's resources. If it doesn't exist, an error is raised
-    //
+    
+    // Get the path of the client's resources.
+    // If it doesn't exist, it is created. 
     let dir = match exists("resources"){
         Ok(true) => PathBuf::from("resources"),
         Ok(false) => {
@@ -45,16 +47,19 @@ pub(crate) fn get_file_hashes() -> std::io::Result<Vec<u32>> {
         let file = file?;
         let path = file.path();
         if path.is_file() {
+            // generate the file hash
             if let Ok(hash) = hash_file_u32(&path)  {
                 if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                    // TODO swap println! to debug! if needed
                     println!("Found file {:?}, with hash {:?}", file_name, hash);
+                    // append the generated hash to results
                     results.push(hash);
                 }
             }
         }
     }
 
-    // Return the list of files with their hashes
+    // Return the list of hashes
     Ok(results)
 
 }
