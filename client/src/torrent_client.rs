@@ -1,7 +1,7 @@
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
 use stunclient::StunClient;
-use tokio::net::{UdpSocket};
+use tokio::{net::UdpSocket, sync::mpsc};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_stream::StreamExt;
@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
 use tokio::time::{sleep, timeout};
 use crate::file_handler::get_file_hashes;
+use crate::data_handler::*;
 
 #[derive(Debug)]
 pub struct TorrentClient {
@@ -22,10 +23,10 @@ pub struct TorrentClient {
     priv_socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
     info_hashes: Vec<u32>,
+    data_handler: DataHandler,
 }
 
 impl TorrentClient {
-
     pub async fn new(server: &mut ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
 
         //bind port and get public facing id
@@ -76,7 +77,8 @@ impl TorrentClient {
             Ok(file_hashes) => file_hashes,
             Err(err) => return Err(Box::new(err)),
         };
-        
+
+        let data_handler = DataHandler();
         
         Ok(
             TorrentClient {
@@ -85,6 +87,7 @@ impl TorrentClient {
                 priv_socket: Some(priv_socket),
                 self_addr,
                 info_hashes,
+                data_handler: DataHandler,
             },
         )
     }

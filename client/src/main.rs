@@ -4,6 +4,7 @@ mod quic_p2p_sender;
 mod turn_fallback;
 mod connection;
 mod file_handler;
+mod data_handler;
 
 use torrent_client::TorrentClient;
 
