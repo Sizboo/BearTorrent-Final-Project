@@ -165,6 +165,9 @@ impl QuicP2PConn {
 
     pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr)
     -> Result<(), Box<dyn std::error::Error>> {
+
+        // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
+
         let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
         let read_task = tokio::spawn(async move {
             let res = QuicP2PConn::recv_data(conn).await;

@@ -24,6 +24,7 @@ pub struct TorrentClient {
     pub(crate) self_addr: PeerId,
     info_hashes: Vec<u32>,
     data_handler: DataHandler,
+    data_handler_tx: mpsc::Sender<SocketData>,
 }
 
 impl TorrentClient {
@@ -78,7 +79,7 @@ impl TorrentClient {
             Err(err) => return Err(Box::new(err)),
         };
 
-        let data_handler = DataHandler();
+        let (data_handler, data_handler_tx) = DataHandler::new();
         
         Ok(
             TorrentClient {
@@ -87,7 +88,8 @@ impl TorrentClient {
                 priv_socket: Some(priv_socket),
                 self_addr,
                 info_hashes,
-                data_handler: DataHandler,
+                data_handler,
+                data_handler_tx
             },
         )
     }
@@ -241,8 +243,10 @@ impl TorrentClient {
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 
-            let fallback = TurnFallback::start(self.server.turn.clone(), client_id).await?;
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
+
+            // TODO probably develop a better way to do the actual send over TURN...
             let response = self.server.client.get_client_id(peer_id).await?;
             let target = response.into_inner();
             let buf = "data sent over TURN".as_bytes().to_vec();
@@ -303,7 +307,7 @@ impl TorrentClient {
             let client_id = self.server.uid.clone()
                 .expect("server.uid must be set before calling TurnFallback::start");
 
-            let fallback = TurnFallback::start(self.server.turn.clone(), client_id).await?;
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
             // TODO remove... just needed to have this to keep the program open long enough to receive data
             tokio::time::sleep(Duration::from_millis(10000)).await;
