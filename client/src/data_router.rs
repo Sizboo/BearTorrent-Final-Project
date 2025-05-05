@@ -8,14 +8,14 @@ pub struct SocketData {
 }
 
 #[derive(Debug)]
-pub struct DataHandler {
+pub struct DataRouter {
     rx: mpsc::Receiver<SocketData>,
 }
 
-impl DataHandler {
+impl DataRouter {
     pub fn new() -> (Self, mpsc::Sender<SocketData>) {
         let (tx, rx) = mpsc::channel::<SocketData>(10);
-        ( DataHandler { rx }, tx )
+        ( DataRouter { rx }, tx )
     }
 
     pub async fn run(
