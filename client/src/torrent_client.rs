@@ -36,7 +36,7 @@ impl TorrentClient {
         let client = StunClient::new(stun_server);
         let external_addr = client.query_external_address(&socket)?;
 
-        let pub_ipaddr =  match external_addr.ip() {
+        let ipaddr =  match external_addr.ip() {
             IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
             IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
         }?;
@@ -63,8 +63,8 @@ impl TorrentClient {
         let priv_socket = UdpSocket::bind(SocketAddrV4::new(priv_ipaddr, priv_port)).await?;
 
         let self_addr = PeerId {
-            pub_ipaddr,
-            pub_port: external_addr.port() as u32,
+            ipaddr,
+            port: external_addr.port() as u32,
             priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
             priv_port: priv_port as u32,
         };
@@ -194,7 +194,7 @@ impl TorrentClient {
             //todo remove unwarp error checking IS IMPORTANT HERE
             let uid = torrent_client.server.uid.clone().unwrap();
             println!("My Client ID: {:?}", uid);
-            let response = server_client.get_peer(uid).await;
+            let response = server_client.seed(uid).await;
 
             // waits for response from get_peer
             match response {
@@ -215,15 +215,15 @@ impl TorrentClient {
     
     pub async fn connect_to_peer(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
         let peer_id = res.into_inner();
-        let pub_ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
-        let pub_port = peer_id.pub_port as u16;
+        let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+        let pub_port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
 
 
         println!("peer to send {:?}", peer_id);
 
         //todo 1. try connection over local NAT
-        if self.self_addr.pub_ipaddr == peer_id.pub_ipaddr {
+        if self.self_addr.ipaddr == peer_id.ipaddr {
             // println!("Returned value {:?}", socket);
             //start quick server
             let socket = self.priv_socket.take().unwrap();
@@ -233,26 +233,30 @@ impl TorrentClient {
         }
 
         //todo 2. try hole punch
-        else if let Ok(socket) = self.hole_punch(peer_addr).await {
-            println!("Returned value {:?}", socket);
-            //start quick server
-            let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.pub_ipaddr).to_string()).await?;
-            p2p_sender.quic_listener().await?;
-        } else {
-            // TURN for sending here
-            let client_id = self.server.uid.clone()
-                .expect("server.uid must be set before calling TurnFallback::start");
+            //todo refactor this so that it falls back on turn no matter what
+        else {
+            self.server.client.init_cert_sender(peer_id).await?;
+            if let Ok(socket) = self.hole_punch(peer_addr).await {
+                println!("Returned value {:?}", socket);
+                //start quick server
+                let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.ipaddr).to_string()).await?;
+                p2p_sender.quic_listener().await?;
+            } else {
+                // TURN for sending here
+                let client_id = self.server.uid.clone()
+                    .expect("server.uid must be set before calling TurnFallback::start");
 
-            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
+                let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
 
-            // TODO probably develop a better way to do the actual send over TURN...
-            let response = self.server.client.get_client_id(peer_id).await?;
-            let target = response.into_inner();
-            let buf = "data sent over TURN".as_bytes().to_vec();
+                // TODO probably develop a better way to do the actual send over TURN...
+                let response = self.server.client.get_client_id(peer_id).await?;
+                let target = response.into_inner();
+                let buf = "data sent over TURN".as_bytes().to_vec();
 
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-            fallback.send_to(target, buf).await?;
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+                fallback.send_to(target, buf).await?;
+            }
         }
 
         Ok(())
@@ -275,15 +279,15 @@ impl TorrentClient {
 
     ///Used when client is requesting a file
     pub async fn get_file_from_peer(&mut self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-        let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
-        let port = peer_id.pub_port as u16;
+        let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+        let port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((ip_addr, port));
        
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
 
         //todo refactor for final implementation
-        if self.self_addr.pub_ipaddr == peer_id.pub_ipaddr {
+        if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
             let port = peer_id.priv_port as u16;
             let lan_peer_addr = SocketAddr::from((ip_addr, port));
@@ -296,8 +300,8 @@ impl TorrentClient {
             //init the map so cert can be retrieved
 
         if let Ok(socket) = self.hole_punch(peer_addr).await {
-            let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
-            let port = peer_id.pub_port as u16;
+            let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+            let port = peer_id.port as u16;
             let peer_addr = SocketAddr::from((ip_addr, port));
 
             let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr, self.server.clone()).await?;

@@ -24,28 +24,6 @@ impl ServerConnection {
         let client = connector_client::ConnectorClient::new(endpoint.clone());
         let turn = turn_client::TurnClient::new(endpoint);
 
-        //todo use this to figure out id persistence across sessions
-        //1. get uuid
-        // let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
-        //     .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
-        // let path = dirs.data_local_dir();
-        // let uid_path = path.join("uuid.der");
-        // 
-        // let mut uid= "".to_string();
-        // 
-        // if uid_path.exists() {
-        //     uid = std::fs::read_to_string(&uid_path)?;
-        //     
-        //     //todo verify server has uid
-        // }
-        // //2. get new uid from server 
-        // else {
-        //     
-        // }
-        //update id information
-        // fs::create_dir_all(&path)?;
-        // fs::write(&uid_path, uid.clone())?;
-
         Ok(
             ServerConnection {
                 client,
