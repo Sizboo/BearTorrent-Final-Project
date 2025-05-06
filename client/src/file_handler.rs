@@ -15,15 +15,20 @@ impl InfoHash {
     // Generate the info hash struct given a file
     pub fn new(file: DirEntry) -> std::io::Result<Self> {
         let path = file.path(); // PathBuf of the file
-        
+
         // Name of the file
         let name = path.file_name().unwrap().to_str().unwrap().to_string(); // TODO less unwraps?
         // Byte length of the file
         let file_length = file.path().metadata()?.len();
         // Size of the pieces
-        let piece_length = Self::get_piece_length(file_length); 
+        let piece_length = Self::get_piece_length(file_length);
         // Vector of piece hashes
         let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
+
+        println!("File length: {}", file_length);
+        println!("Piece length: {}", piece_length);
+        println!("Pieces: {:?}", pieces);
+        println!("File name: {}", name);
 
         Ok(InfoHash{
             name,
@@ -33,18 +38,18 @@ impl InfoHash {
         })
 
     }
-    
-    // Generates a vector containing 20-byte SHA1 hash of each piece from a file 
+
+    // Generates a vector containing 20-byte SHA1 hash of each piece from a file
     fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize) -> std::io::Result<Vec<[u8;20]>>{
         let mut file_reader = BufReader::new(File::open(path)?);
         let mut buf = vec![0u8;piece_length];
         let mut pieces: Vec<[u8;20]> = Vec::new();
-        
+
         // Loop through the file, reading in chunks from bytes_read to piece_length
         loop {
-            
+
             let mut bytes_read = 0; // total bytes read
-            
+
             // Read whole file
             while bytes_read < piece_length{
                 // read segments of the file as pieces
@@ -58,11 +63,11 @@ impl InfoHash {
             if bytes_read == 0 {
                 break;
             }
-            
-            // Hash the piece of data that was read 
+
+            // Hash the piece of data that was read
             let mut hasher = Sha1::new();
             hasher.update(&buf[..]); // update hash with any data in current buffer
-            
+
             // Finalize result of the hash, append 20-byte result to the pieces vector
             let result = hasher.finalize();
             let bytes: [u8; 20] = result.try_into().unwrap();
@@ -79,9 +84,7 @@ impl InfoHash {
             0..=67_108_864 => 65_536,             // ≤ 64 MiB → 64 KiB
             67_108_865..=536_870_912 => 262_144,  // ≤ 512 MiB → 256 KiB
             536_870_913..=1_073_741_824 => 524_288, // ≤ 1 GiB → 512 KiB
-            1_073_741_825..=4_294_967_296 => 1_048_576, // ≤ 4 GiB → 1 MiB
-            4_294_967_297..=17_179_869_184 => 2_097_152, // ≤ 16 GiB → 2 MiB
-            _ => 4_194_304,                      // > 16 GiB → 4 MiB
+            _ => 1_048_576, // ≤ 4 GiB → 1 MiB
         }
     }
 
@@ -124,7 +127,7 @@ pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
     for file in read_dir(dir)? {
         let file = file?;
         let path = file.path();
-        
+
         // If the entry is a file, create InfoHash and append
         if path.is_file() {
             results.push(InfoHash::new(file)?)
