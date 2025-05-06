@@ -1,39 +1,113 @@
-use std::fs::{File, read_dir, create_dir, exists};
+use std::fs::{DirEntry, File, read_dir, create_dir, exists};
 use sha1::{Sha1, Digest};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug)]
 pub struct InfoHash{
-    file_length: u32, // Size of the file in bytes
-    piece_length: u32, // Number of bytes per piece
+    name: String, // Name of the file
+    file_length: u64, // Size of the file in bytes
+    piece_length: u64, // Number of bytes per piece
     pieces: Vec<[u8;20]>, // hash list of the pieces
 }
-// This function generates the info hash of a given file.
-// Client files will be located in client/resources.
-// Returns: u32 file hash
-fn hash_file_u32<P: AsRef<Path>>(path: P) -> std::io::Result<u32> {
-    let mut hasher = Sha1::new();
-    let mut file = BufReader::new(File::open(path)?);
-    let mut buf = [0u8; 4096];
 
-    // Read through the file and update the hasher
-    while let Ok(size) = file.read(&mut buf[..]) {
-        if size == 0 {
-            break;
-        }
-        hasher.update(&buf[0..size]);
+impl InfoHash {
+    // Generate the info hash struct given a file
+    pub fn new(file: DirEntry) -> std::io::Result<Self> {
+        let path = file.path(); // PathBuf of the file
+        
+        // Name of the file
+        let name = path.file_name().unwrap().to_str().unwrap().to_string(); // TODO less unwraps?
+        // Byte length of the file
+        let file_length = file.path().metadata()?.len();
+        // Size of the pieces
+        let piece_length = Self::get_piece_length(file_length); 
+        // Vector of piece hashes
+        let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
+
+        Ok(InfoHash{
+            name,
+            file_length,
+            piece_length,
+            pieces
+        })
+
     }
-    // Now finish generating the hash result and return it
-    let result = hasher.finalize();
-    let hash = u32::from_be_bytes([result[0], result[1], result[2], result[3]]);
-    Ok(hash)
+    
+    // Generates a vector containing 20-byte SHA1 hash of each piece from a file 
+    fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize) -> std::io::Result<Vec<[u8;20]>>{
+        let mut file_reader = BufReader::new(File::open(path)?);
+        let mut buf = vec![0u8;piece_length];
+        let mut pieces: Vec<[u8;20]> = Vec::new();
+        
+        // Loop through the file, reading in chunks from bytes_read to piece_length
+        loop {
+            
+            let mut bytes_read = 0; // total bytes read
+            
+            // Read whole file
+            while bytes_read < piece_length{
+                // read segments of the file as pieces
+                let n = file_reader.read(&mut buf[bytes_read..piece_length])?;
+                if n == 0 { // EOF
+                    break;
+                }
+                bytes_read += n;
+            }
+            // If nothing or EOF was read, no need to hash, break loop
+            if bytes_read == 0 {
+                break;
+            }
+            
+            // Hash the piece of data that was read 
+            let mut hasher = Sha1::new();
+            hasher.update(&buf[..]); // update hash with any data in current buffer
+            
+            // Finalize result of the hash, append 20-byte result to the pieces vector
+            let result = hasher.finalize();
+            let bytes: [u8; 20] = result.try_into().unwrap();
+            pieces.push(bytes.into());
+        }
+        Ok(pieces)
+
+
+    }
+
+    // Determines the length of the pieces based on the length of the file
+    fn get_piece_length(length: u64) -> u64 {
+        match length {
+            0..=67_108_864 => 65_536,             // ≤ 64 MiB → 64 KiB
+            67_108_865..=536_870_912 => 262_144,  // ≤ 512 MiB → 256 KiB
+            536_870_913..=1_073_741_824 => 524_288, // ≤ 1 GiB → 512 KiB
+            1_073_741_825..=4_294_967_296 => 1_048_576, // ≤ 4 GiB → 1 MiB
+            4_294_967_297..=17_179_869_184 => 2_097_152, // ≤ 16 GiB → 2 MiB
+            _ => 4_194_304,                      // > 16 GiB → 4 MiB
+        }
+    }
+
+    // Generate the 20-byte SHA1 hash of the InfoHash
+    pub fn get_hashed_info_hash(&self) -> [u8; 20] {
+        // Hash all members of the info hash
+        let mut hasher = Sha1::new();
+        hasher.update(self.file_length.to_be_bytes());
+        hasher.update(self.piece_length.to_be_bytes());
+        hasher.update(self.name.as_bytes());
+        for piece in &self.pieces {
+            hasher.update(piece);
+        }
+
+        // Finalize the hash and generate the 20-byte value
+        let result = hasher.finalize();
+        let bytes: [u8; 20] = result.try_into().unwrap();
+        bytes
+    }
 }
 
 // This function goes through the client's resource directory
 // to generate info hashes for each file
-// Returns: Vec<u32>
-pub(crate) fn get_file_hashes() -> std::io::Result<Vec<u32>> {
-    let mut results = vec![];
+// Returns: Vec<InfoHash>
+pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
+    let mut results: Vec<InfoHash> = Vec::new();
     
     // Get the path of the client's resources.
     // If it doesn't exist, it is created. 
@@ -50,16 +124,10 @@ pub(crate) fn get_file_hashes() -> std::io::Result<Vec<u32>> {
     for file in read_dir(dir)? {
         let file = file?;
         let path = file.path();
+        
+        // If the entry is a file, create InfoHash and append
         if path.is_file() {
-            // generate the file hash
-            if let Ok(hash) = hash_file_u32(&path)  {
-                if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
-                    // TODO swap println! to debug! if needed
-                    println!("Found file {:?}, with hash {:?}", file_name, hash);
-                    // append the generated hash to results
-                    results.push(hash);
-                }
-            }
+            results.push(InfoHash::new(file)?)
         }
     }
 

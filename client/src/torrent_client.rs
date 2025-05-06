@@ -13,7 +13,7 @@ use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList};
 use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
 use tokio::time::{sleep, timeout};
-use crate::file_handler::get_file_hashes;
+use crate::file_handler::{get_info_hashes, InfoHash};
 use crate::data_handler::*;
 
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub struct TorrentClient {
     pub_socket: Option<UdpSocket>,
     priv_socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
-    info_hashes: Vec<u32>,
+    info_hashes: Vec<InfoHash>,
     data_handler: DataHandler,
     data_handler_tx: mpsc::Sender<SocketData>,
 }
@@ -74,7 +74,7 @@ impl TorrentClient {
         
         let server = server.clone();
         
-        let info_hashes = match get_file_hashes(){
+        let info_hashes = match get_info_hashes(){
             Ok(file_hashes) => file_hashes,
             Err(err) => return Err(Box::new(err)),
         };
