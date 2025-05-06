@@ -4,7 +4,7 @@ mod quic_p2p_sender;
 mod turn_fallback;
 mod connection;
 mod file_handler;
-mod data_handler;
+mod data_router;
 mod piece_assembler;
 mod message;
 

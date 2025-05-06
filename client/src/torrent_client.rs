@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
 use tokio::time::{sleep, timeout};
 use crate::file_handler::{get_info_hashes, InfoHash};
-use crate::data_handler::*;
+use crate::data_router::*;
 
 #[derive(Debug)]
 pub struct TorrentClient {
@@ -23,7 +23,7 @@ pub struct TorrentClient {
     priv_socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
     info_hashes: Vec<InfoHash>,
-    data_handler: DataHandler,
+    data_handler: DataRouter,
     data_handler_tx: mpsc::Sender<SocketData>,
 }
 
@@ -79,7 +79,7 @@ impl TorrentClient {
             Err(err) => return Err(Box::new(err)),
         };
 
-        let (data_handler, data_handler_tx) = DataHandler::new();
+        let (data_handler, data_handler_tx) = DataRouter::new();
         
         Ok(
             TorrentClient {
