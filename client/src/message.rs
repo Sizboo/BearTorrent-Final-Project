@@ -2,11 +2,30 @@ use std::io::{Cursor, Write};
 
 #[derive(Debug, PartialEq)]
 #[repr(u8)]
-// Using the message IDs from the specification
+// Using the message IDs and taking descriptions from the specification.
 pub enum Message{
-    Request{ index: u32, begin: u32, length: u32 } = 6, 
-    Piece{ index: u32, begin: u32, block: Vec<u8> } = 7,
-    Cancel{ index: u32, begin: u32, length: u32 } = 8,
+    // Fixed length message used to request a block from a piece.
+    // If pieces are large, a request on the same piece could be
+    // sent with successive 'begin' values
+    Request{
+        index: u32, // Pieces are requested by their zero-based index value
+        begin: u32, // The zero-based byte offset within the piece being requested
+        length: u32 // Requested length to get from the piece
+    } = 6,
+
+    // Variable length message containing a block of the piece.
+    Piece{
+        index: u32, // Zero-based index of the piece
+        begin: u32, // The zero-based byte offset within the piece
+        block: Vec<u8> // The block of data, which is a subset of the piece specified by the index
+    } = 7,
+
+    // Fixed length message to cancel a block request. Payload is identical to the request message.
+    Cancel{
+        index: u32, // Zero-based index of the piece
+        begin: u32, // Zero-based byte offset within the piece
+        length: u32 // Requested length of the piece
+    } = 8,
 }
 
 impl Message{

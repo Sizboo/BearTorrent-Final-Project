@@ -3,6 +3,11 @@ use sha1::{Sha1, Digest};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
+pub struct InfoHash{
+    file_length: u32, // Size of the file in bytes
+    piece_length: u32, // Number of bytes per piece
+    pieces: Vec<[u8;20]>, // hash list of the pieces
+}
 // This function generates the info hash of a given file.
 // Client files will be located in client/resources.
 // Returns: u32 file hash
@@ -18,7 +23,6 @@ fn hash_file_u32<P: AsRef<Path>>(path: P) -> std::io::Result<u32> {
         }
         hasher.update(&buf[0..size]);
     }
-
     // Now finish generating the hash result and return it
     let result = hasher.finalize();
     let hash = u32::from_be_bytes([result[0], result[1], result[2], result[3]]);
