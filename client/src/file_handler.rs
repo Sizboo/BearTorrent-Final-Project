@@ -246,13 +246,13 @@ pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
         }
     }
     
-    let mut buf: Vec<u8> = Vec::new();
-    buf.push(128);
-    for info_hash in results {
-        write_piece_to_part(info_hash, buf.clone(), 0u64)?
-    }
-    
-    let mut results: Vec<InfoHash> = Vec::new();
+    // let mut buf: Vec<u8> = Vec::new();
+    // buf.push(128);
+    // for info_hash in results {
+    //     write_piece_to_part(info_hash, buf.clone(), 0u64)?
+    // }
+    // 
+    // let mut results: Vec<InfoHash> = Vec::new();
 
     // Return the list of hashes
     Ok(results)
