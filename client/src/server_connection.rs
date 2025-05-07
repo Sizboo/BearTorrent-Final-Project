@@ -1,11 +1,11 @@
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, PeerId};
+use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, PeerId};
 
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
     pub(crate) client: connector_client::ConnectorClient<Channel>,
     pub(crate) turn: turn_client::TurnClient<Channel>,
-    pub(crate) uid: Option<ClientId>,
+    pub(crate) uid: ClientId,
 }
 
 const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
@@ -21,21 +21,22 @@ impl ServerConnection {
         let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
             .connect().await?;
 
-        let client = connector_client::ConnectorClient::new(endpoint.clone());
+        let mut client = connector_client::ConnectorClient::new(endpoint.clone());
         let turn = turn_client::TurnClient::new(endpoint);
+        
+        let uid = client.register_client(ClientRegistry { peer_id: None} ).await?;
+        let uid = uid.into_inner();
 
         Ok(
             ServerConnection {
                 client,
                 turn,
-                uid: None,
+                uid,
             }
         )
     }
 
-    pub async fn register_server_connection(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-        let uid = self.client.register_client(self_addr).await?;
-        self.uid = Some(uid.into_inner());
+    pub async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
 
         Ok(())
     }

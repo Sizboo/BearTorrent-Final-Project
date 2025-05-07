@@ -1,13 +1,14 @@
 mod turn;
 
 use std::{env, collections::HashMap, sync::Arc};
+use std::cmp::PartialEq;
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
 use tokio::sync::{Mutex, mpsc};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::connection::{Cert, CertMessage, ClientId, HolePunch};
+use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FullId };
 use crate::connection::turn_server::TurnServer;
 use crate::turn::TurnService;
 
@@ -25,7 +26,7 @@ struct Seeder {
 
 #[derive(Debug, Default)]
 pub struct ConnectionService {
-    client_registry: Arc<RwLock<HashMap<ClientId, PeerId>>>,
+    client_registry: Arc<RwLock<HashMap<ClientId, Option<PeerId>>>>,
     file_tracker: Arc<Mutex<HashMap<u32, Vec<ClientId>>>>,
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
@@ -34,7 +35,6 @@ pub struct ConnectionService {
 
 impl ConnectionService {
 }
-
 
 #[tonic::async_trait]
 impl Connector for ConnectionService {
@@ -67,7 +67,8 @@ impl Connector for ConnectionService {
             
             
             let map = self.client_registry.read().await;
-            let peer_list = seeders.iter().filter_map( |s| map.get(&s).cloned()).collect();
+            // todo maybe resolve unwarp here
+            let peer_list = seeders.iter().filter_map( |s| map.get(&s).cloned().unwrap()).collect();
             
             
             Ok(Response::new(PeerList { list: peer_list }))
@@ -91,7 +92,7 @@ impl Connector for ConnectionService {
                 let peer_id = self.client_registry.read().await
                     .get(&client_id).cloned().ok_or(Status::internal("failed to get peer id"))?;
                 
-                Ok(Response::new(peer_id))
+                Ok(Response::new(peer_id.ok_or(Status::internal("failed to get peer id"))?))
             }
             None => Err(Status::internal("dropped")),
         }
@@ -115,10 +116,10 @@ impl Connector for ConnectionService {
         
     }
     
-    ///init hole punch is used to notify a seeding peer that they should begin the udp hole punching procedure
-    /// this should be called right before the calling peer initiates their own hole punching procedure
+    ///init hole punch is used to notify a seeding peer that they should begin the udp hole punching procedure.
+    /// This function should be called right before the calling peer initiates their own hole punching procedure
     /// as UDP hole punching is time-sensitive.
-    async fn init_punch(&self, request: Request<HolePunch>) -> Result<Response<()>, Status> {
+    async fn init_punch(&self, request: Request<FullId>) -> Result<Response<()>, Status> {
        
         let req = request.into_inner();
         let peer_id = req.peer_id.ok_or(Status::invalid_argument("peer id not provided"))?;
@@ -163,7 +164,8 @@ impl Connector for ConnectionService {
         let peer_id = self.client_registry.read().await.get(&client_id).cloned()
             .ok_or(Status::invalid_argument("failed to get peer id in advertise"))?;
         
-        self.init_hole_punch.write().await.insert(peer_id, tx);
+        //todo fix this 
+        // self.init_hole_punch.write().await.insert(peer_id, tx);
         
         let mut send_tracker = self.send_tracker.lock().await;
         send_tracker.insert(client_id.clone(), rx);
@@ -173,7 +175,7 @@ impl Connector for ConnectionService {
 
     async fn register_client(
         &self,
-        request: Request<PeerId>,
+        request: Request<ClientRegistry>,
     ) -> Result<Response<ClientId>, Status> {
         
         let mut uid;
@@ -192,9 +194,24 @@ impl Connector for ConnectionService {
             return Err(Status::internal("failed to generate uid"))?
         }
         
-        self.client_registry.write().await.insert(uid.clone(), request.into_inner());
+        self.client_registry.write().await.insert(uid.clone(), request.into_inner().peer_id);
 
         Ok(Response::new(uid ))
+    }
+
+    
+    /// update_registered_peer_id() is used to update the peer id of a client that has been registered
+    /// this is used when a client changes their ip address
+    async fn update_registered_peer_id(&self, request: Request<FullId>) -> Result<Response<ClientId>, Status> {
+    
+        let r = request.into_inner();
+        let self_id = r.self_id.ok_or(Status::invalid_argument("self id not provided"))?;
+        let peer_id = r.peer_id.ok_or(Status::invalid_argument("peer id not provided"))?;
+        
+        self.client_registry.write().await.insert(self_id.clone(), Some(peer_id));
+        
+        Ok(Response::new(self_id))
+    
     }
 
     /// init_cert_sender() must be called before a quic connection can be established
@@ -272,7 +289,7 @@ impl Connector for ConnectionService {
         let client_id = registry
             .iter()
             .find_map(|(client_id, saved_peer)| {
-                if saved_peer == &peer {
+                if saved_peer.unwrap() == peer {
                     Some(client_id.clone())
                 } else {
                     None
