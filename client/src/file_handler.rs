@@ -133,6 +133,11 @@ fn get_part_file(file_name: String) -> PathBuf {
     path
 }
 
+fn get_info_file(file_name: String) -> (PathBuf, bool) {
+    let (path, is_new) = get_temp_file(file_name, "info".to_string()).unwrap();
+    (path, is_new)
+}
+
 // Create the files directory if it doesn't exist
 fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
     let dir = match create_dir_all("resources/files"){
@@ -143,14 +148,13 @@ fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
 }
 
 // Returns the Status struct that represents the status of the file download
-fn get_info_status(file_name: String, info_hash: InfoHash) -> Status {
-    let (path, is_new) = get_temp_file(file_name, "info".to_string()).unwrap();
+fn get_info_status(file_name: String, num_pieces: usize) -> Status {
+    let (path, is_new) = get_info_file(file_name);
     let mut info_file = File::open(&path).unwrap();
     match is_new {
         // If the .info has never been generated before, construct the file
         true => {
-            let mut length = info_hash.pieces.len();
-            let mut pieces= vec![0u8;length];
+            let mut pieces= vec![0u8;num_pieces];
             info_file.write_all(&pieces).unwrap();
             Status{
                 pieces_status: pieces
@@ -198,19 +202,28 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
     let dir = get_client_cache_dir()?;
 
     // Creates the .part file if it doesn't exist, returns PathBuf of this file
-    let mut part_file_path = get_part_file(info_hash.name);
+    let part_path = get_part_file(info_hash.name.clone());
 
     // Open the .part file
-    let mut part_file = File::open(&part_file_path)?;
+    let mut part_file = File::open(&part_path)?;
 
     // Seek to the index we need to write to, write the piece, flush the buffer
     // TODO check that seeking ahead in an empty file doesn't cause issues
     part_file.seek(SeekFrom::Start((piece_index) * info_hash.piece_length ))?;
     part_file.write_all(&piece)?;
     part_file.flush()?;
+    
+    // Update the status of the piece within the .info file
+    let mut info_status = get_info_status(info_hash.name.clone(), info_hash.pieces.len());
+    info_status.pieces_status[piece_index as usize] = 1u8; // Sets piece at index to true
 
-
-
+    
+    let (info_file_path, is_new_info) = get_info_file(info_hash.name);
+    let mut info_file = File::open(&info_file_path)?;
+    info_file.seek(SeekFrom::Start(piece_index))?;
+    info_file.write_all(&[1u8])?;
+    info_file.flush()?;
+    
     Ok(())
 
 }
