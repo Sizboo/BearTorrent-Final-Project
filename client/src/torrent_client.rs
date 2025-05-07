@@ -221,11 +221,12 @@ impl TorrentClient {
         let pub_port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
         let mut conn_success = false;
+        
 
 
         println!("peer to send {:?}", peer_id);
 
-        //todo 1. try connection over local NAT
+        //1. try connection over local NAT
         if self.self_addr.ipaddr == peer_id.ipaddr {
             // println!("Returned value {:?}", socket);
             //start quick server
@@ -248,43 +249,61 @@ impl TorrentClient {
             }
         }
         
+        //2. try connection across NAT
         if !conn_success {
             let timeout_duration = Duration::from_secs(4);
-            timeout(timeout_duration)
+            let res = timeout(
+                timeout_duration, 
+                self.server.client.await_hole_punch_trigger(self.server.uid.clone().ok_or("client id not found")? )
+            ).await?;
+            
+            match res {
+                Ok(_) => {
+                    if let Ok(socket) = self.hole_punch(peer_addr).await {
+                        println!("Returned value {:?}", socket);
+                        //start quick server
+                        let p2p_sender = QuicP2PConn::create_quic_server(
+                            self,
+                            socket,
+                            peer_id,
+                            self.server.clone(),
+                            Ipv4Addr::from(self.self_addr.ipaddr).to_string()
+                        ).await?;
+                        println!("P2P quic endpoint across NAT created successfully");
+                        match p2p_sender.quic_listener().await {
+                            Ok(()) => conn_success = true,
+                            Err(e) => {
+                                println!("Connection across NAT after hole punch failed");
+                                conn_success = false;
+                            }
+                        }
+                    } 
+                },
+                Err(e) => {
+                    conn_success = false;
+                    println!("Failed to receive hole punch trigger");
+                }
+            }
         
         }
             
-        //todo 2. try hole punch
-            //todo refactor this so that it falls back on turn no matter what
-        else {
-            if let Ok(socket) = self.hole_punch(peer_addr).await {
-                println!("Returned value {:?}", socket);
-                //start quick server
-                let p2p_sender = QuicP2PConn::create_quic_server(
-                    self, 
-                    socket, 
-                    peer_id, 
-                    self.server.clone(), 
-                    Ipv4Addr::from(self.self_addr.ipaddr).to_string()
-                ).await?;
-                println!("P2P quic endpoint created successfully");
-                p2p_sender.quic_listener().await?;
-            } else {
-                // TURN for sending here
-                let client_id = self.server.uid.clone()
-                    .expect("server.uid must be set before calling TurnFallback::start");
+        // Fall back connection on TURN
+        if !conn_success {
+      
+            // TURN for sending here
+            let client_id = self.server.uid.clone()
+                .expect("server.uid must be set before calling TurnFallback::start");
 
-                let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
 
-                // TODO probably develop a better way to do the actual send over TURN...
-                let response = self.server.client.get_client_id(peer_id).await?;
-                let target = response.into_inner();
-                let buf = "data sent over TURN".as_bytes().to_vec();
+            // TODO probably develop a better way to do the actual send over TURN...
+            let response = self.server.client.get_client_id(peer_id).await?;
+            let target = response.into_inner();
+            let buf = "data sent over TURN".as_bytes().to_vec();
 
-                tokio::time::sleep(Duration::from_millis(1000)).await;
-                fallback.send_to(target, buf).await?;
-            }
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+            fallback.send_to(target, buf).await?;
         }
 
         Ok(())
