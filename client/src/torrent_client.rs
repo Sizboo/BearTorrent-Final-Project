@@ -366,6 +366,8 @@ impl TorrentClient {
             //initiate hole punch routine with other peer
             server_connection.init_punch(peer_id).await?;
             
+            sleep(Duration::from_millis(500)).await;
+            
             if let Ok(socket) = self.hole_punch(peer_addr).await {
                 let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
                 let port = peer_id.port as u16;
