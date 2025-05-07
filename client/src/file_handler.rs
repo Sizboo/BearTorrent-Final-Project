@@ -11,8 +11,10 @@ pub struct InfoHash{
     pieces: Vec<[u8;20]>, // hash list of the pieces
 }
 
+// Represents the status of the piece download
+#[derive(Debug)]
 pub struct Status{
-    pieces_status: Vec<bool>
+    pieces_status: Vec<u8>
 }
 
 impl InfoHash {
@@ -112,28 +114,25 @@ impl InfoHash {
 
 // Checks if a file exists, if it doesn't then it is created.
 // Returns the PathBuf to this file
-fn get_temp_file(file_name: String, extension: String) -> std::io::Result<(PathBuf)> {
+fn get_temp_file(file_name: String, extension: String) -> std::io::Result<(PathBuf, bool)> {
     let temp_file_name = format!("resources/files/{}.{}", file_name, extension);
-    let temp_file = match exists(Path::new(&temp_file_name)) {
-        Ok(true) => PathBuf::from(temp_file_name),
+    let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
+        Ok(true) => (PathBuf::from(temp_file_name), true),
         Ok(false) => {
             File::create(&temp_file_name)?;
-            PathBuf::from(temp_file_name)
+            (PathBuf::from(temp_file_name), false)
         }
         Err(e) => return Err(e),
     };
     Ok(temp_file)
 }
 
-// Get the .info of the specified file
-fn get_info_file(file_name: String) -> std::io::Result<(PathBuf)> {
-    get_temp_file(file_name, "info".to_string())    
+// Get the .part of the specified file
+fn get_part_file(file_name: String) -> PathBuf {
+    let (path, is_new) = get_temp_file(file_name, "part".to_string()).unwrap();
+    path
 }
 
-// Get the .part of the specified file
-fn get_part_file(file_name: String) -> std::io::Result<(PathBuf)> {
-    get_temp_file(file_name, "part".to_string())
-}
 // Create the files directory if it doesn't exist
 fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
     let dir = match create_dir_all("resources/files"){
@@ -141,6 +140,36 @@ fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
         Err(e) => return Err(e),
     };
     Ok(dir)
+}
+
+// Returns the Status struct that represents the status of the file download
+fn get_info_status(file_name: String, info_hash: InfoHash) -> Status {
+    let (path, is_new) = get_temp_file(file_name, "info".to_string()).unwrap();
+    let mut info_file = File::open(&path).unwrap();
+    match is_new {
+        // If the .info has never been generated before, construct the file
+        true => {
+            let mut length = info_hash.pieces.len();
+            let mut pieces= vec![0u8;length];
+            info_file.write_all(&pieces).unwrap();
+            Status{
+                pieces_status: pieces
+            }
+        }
+        // .info existed before, so we can read from it
+        false => {
+            let mut buffer: Vec<u8> = Vec::new();
+            info_file.read_to_end(&mut buffer).unwrap();
+            
+            Status{
+                pieces_status: buffer
+            }
+            
+        }
+    }
+
+
+
 }
 
 // Create the cache directory for .part and .info files if it doesn't exist
@@ -157,7 +186,7 @@ fn get_client_cache_dir() -> std::io::Result<(PathBuf)> {
 fn verify_client_dir_setup() -> () {
     // Create the cache directory for .part and .info files
     let cache = get_client_cache_dir();
-    
+
     // Create the files directory if it doesn't exist
     let dir = get_client_files_dir();
 }
@@ -167,23 +196,23 @@ fn verify_client_dir_setup() -> () {
 pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_index: u64) -> std::io::Result<()> {
     // Verify cache directory exists
     let dir = get_client_cache_dir()?;
-    
+
     // Creates the .part file if it doesn't exist, returns PathBuf of this file
-    let mut part_file_path = get_part_file(info_hash.name)?;
-    
+    let mut part_file_path = get_part_file(info_hash.name);
+
     // Open the .part file
     let mut part_file = File::open(&part_file_path)?;
-    
+
     // Seek to the index we need to write to, write the piece, flush the buffer
     // TODO check that seeking ahead in an empty file doesn't cause issues
     part_file.seek(SeekFrom::Start((piece_index) * info_hash.piece_length ))?;
     part_file.write_all(&piece)?;
     part_file.flush()?;
-    
-    
-    
+
+
+
     Ok(())
-    
+
 }
 
 // This function goes through the client's resource directory
@@ -191,10 +220,10 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 // Returns: Vec<InfoHash>
 pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
     let mut results: Vec<InfoHash> = Vec::new();
-    
+
     // Verify resources are set up, fetch downloaded files PathBuf
     verify_client_dir_setup();
-    let dir = get_client_files_dir();
+    let dir = get_client_files_dir()?;
 
     // For each file in "/resources", request the hash and append to results
     for file in read_dir(dir)? {
