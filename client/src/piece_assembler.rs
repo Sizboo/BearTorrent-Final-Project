@@ -9,7 +9,7 @@ pub struct PieceAssembler {
     piece_length: u32,
     /// length of the blocks
     block_size: u32,
-    /// storage buffer for piece. blocks we have are: Some<Vec<u8>>, blocks we don't are: None
+    /// storage buffer for piece. blocks we have: Some<Vec<u8>>, blocks we don't are: None
     buf: HashMap<u32, Vec<Option<Vec<u8>>>>,
 }
 
