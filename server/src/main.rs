@@ -4,9 +4,10 @@ use std::{env, collections::HashMap, sync::Arc};
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
 use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::connection::{Cert, CertMessage, ClientId};
+use crate::connection::{Cert, CertMessage, ClientId, HolePunch};
 use crate::connection::turn_server::TurnServer;
 use crate::turn::TurnService;
 
@@ -25,9 +26,10 @@ struct Seeder {
 #[derive(Debug, Default)]
 pub struct ConnectionService {
     client_registry: Arc<RwLock<HashMap<ClientId, PeerId>>>,
-    file_tracker: Arc<Mutex<HashMap<u32, Vec<Seeder>>>>,
+    file_tracker: Arc<Mutex<HashMap<u32, Vec<ClientId>>>>,
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
+    init_hole_punch: Arc<RwLock<HashMap<PeerId, mpsc::Sender<ClientId>>>>,
 }
 
 impl ConnectionService {
@@ -50,20 +52,24 @@ impl Connector for ConnectionService {
 
         // notify all seeders of the file
         if let Some(seeders) = file_tracker.get_mut(&r.info_hash) {
-            //todo implement this so that it selects specific peers (or pieces out file)
-            for seeder in seeders.iter_mut() {
-                
-                let res = seeder.notify.send(requester.clone()).await;
-                
-                if res.is_err() {
-                    return Err(Status::internal("failed to send to seeder"))?
-                }
-            }
-
-            // returns a list of all peers that have a file
-            //todo this needs to send THE seeder/s that are sharing for hole punching, not necessarily everyone with file
+            // //todo implement this so that it selects specific peers (or pieces out file)
+            // for seeder in seeders.iter_mut() {
+            //     
+            //     // let res = seeder.notify.send(requester.clone()).await;
+            //     
+            //     // if res.is_err() {
+            //     //     return Err(Status::internal("failed to send to seeder"))?
+            //     // }
+            // }
+            // 
+            // // returns a list of all peers that have a file
+            // //todo this needs to send THE seeder/s that are sharing for hole punching, not necessarily everyone with file
+            
+            
             let map = self.client_registry.read().await;
-            let peer_list = seeders.iter().filter_map( |s| map.get(&s.client_id).cloned()).collect();
+            let peer_list = seeders.iter().filter_map( |s| map.get(&s).cloned()).collect();
+            
+            
             Ok(Response::new(PeerList { list: peer_list }))
         } else {
             // just returns an empty list
@@ -74,14 +80,14 @@ impl Connector for ConnectionService {
     ///this function is used by clients willing to share data to get peers who request data.
     /// clients should listen to this service at all times they are willing to send.
     //todo consider renaming
-    async fn get_peer(&self, request: Request<ClientId>) -> Result<Response<PeerId>, Status> {
-        println!("get_peer called");
+    async fn seed(&self, request: Request<ClientId>) -> Result<Response<PeerId>, Status> {
         let client_id = request.into_inner(); 
         
         //todo if we implement states (offline, seeding) should first update its state on server to sharing
         // any time in offline status it will not be selected
 
 
+        
         match self.send_tracker.lock().await.get_mut(&client_id) {
             Some(recv) => {
                 let client_id = recv.recv().await
@@ -96,6 +102,27 @@ impl Connector for ConnectionService {
         }
 
 
+    }
+    
+    ///init hole punch is used to notify a seeding peer that they should begin the udp hole punching procedure
+    /// this should be called right before the calling peer initiates their own hole punching procedure
+    /// as UDP hole punching is time-sensitive.
+    async fn init_punch(&self, request: Request<HolePunch>) -> Result<Response<()>, Status> {
+       
+        let req = request.into_inner();
+        let peer_id = req.peer_id.ok_or(Status::invalid_argument("peer id not provided"))?;
+        let self_id = req.self_id.ok_or(Status::invalid_argument("self id not provided"))?;
+        
+        match self.init_hole_punch.read().await.get(&peer_id).cloned() {
+            None => {
+                Err(Status::internal("no seeding peer"))?;
+            }
+            Some(sender) => {
+               sender.send(self_id).await.map_err(|_| Status::internal("failed to send self id to hole punch peer"))?;
+            }
+        }
+        
+        Ok(Response::new(()))
     }
 
     /// this function is used to advertise a client owns a file that can be shared 
@@ -115,11 +142,18 @@ impl Connector for ConnectionService {
         let (tx, rx) = mpsc::channel(1);
 
         let mut file_tracker = self.file_tracker.lock().await;
-        file_tracker.entry(r.info_hash).or_default().push(Seeder {
-            client_id: client_id.clone(),
-            notify: tx,
-        });
-
+        // file_tracker.entry(r.info_hash).or_default().push(Seeder {
+        //     client_id: client_id.clone(),
+        //     notify: tx,
+        // });
+        
+        file_tracker.entry(r.info_hash).or_default().push(client_id.clone());
+       
+        let peer_id = self.client_registry.read().await.get(&client_id).cloned()
+            .ok_or(Status::invalid_argument("failed to get peer id in advertise"))?;
+        
+        self.init_hole_punch.write().await.insert(peer_id, tx);
+        
         let mut send_tracker = self.send_tracker.lock().await;
         send_tracker.insert(client_id.clone(), rx);
 
@@ -167,7 +201,6 @@ impl Connector for ConnectionService {
     ) -> Result<Response<()>, Status> {
         let r = request.into_inner();
 
-        //TODO determine type (it will be cert)
         let (tx, rx ) = mpsc::channel::<Cert>(1);
         self.cert_sender.write().await.insert(r, (tx, Some(rx)));
 

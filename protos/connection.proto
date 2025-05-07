@@ -4,7 +4,8 @@ package connection;
 
 service Connector {
     rpc send_file_request (FileMessage) returns (PeerList);
-    rpc get_peer (ClientId) returns (PeerId);
+    rpc seed (ClientId) returns (PeerId);
+    rpc init_punch (HolePunch) returns (google.protobuf.Empty);
     rpc advertise (FileMessage) returns(ClientId);
     rpc register_client (PeerId) returns (ClientId);
     rpc init_cert_sender (PeerId) returns (google.protobuf.Empty);
@@ -26,11 +27,17 @@ message ClientId {
     string uid = 1;
 }
 
+
 message PeerId {
-    uint32 pub_ipaddr = 1;
-    uint32 pub_port = 2;
+    uint32 ipaddr = 1;
+    uint32 port = 2;
     uint32 priv_ipaddr = 3;
     uint32 priv_port = 4;
+}
+
+message HolePunch {
+    ClientId self_id = 1;
+    PeerId peer_id = 2;
 }
 
 message FileMessage {

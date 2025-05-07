@@ -227,8 +227,14 @@ impl TorrentClient {
             // println!("Returned value {:?}", socket);
             //start quick server
             let socket = self.priv_socket.take().unwrap();
-            let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string()).await?;
-            println!("P2P endpoint created successfully");
+            let p2p_sender = QuicP2PConn::create_quic_server(
+                self, 
+                socket, 
+                peer_id, 
+                self.server.clone(), 
+                Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string()
+            ).await?;
+            println!("P2P quic endpoint created successfully");
             p2p_sender.quic_listener().await?;
         }
 
@@ -239,7 +245,14 @@ impl TorrentClient {
             if let Ok(socket) = self.hole_punch(peer_addr).await {
                 println!("Returned value {:?}", socket);
                 //start quick server
-                let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.ipaddr).to_string()).await?;
+                let p2p_sender = QuicP2PConn::create_quic_server(
+                    self, 
+                    socket, 
+                    peer_id, 
+                    self.server.clone(), 
+                    Ipv4Addr::from(self.self_addr.ipaddr).to_string()
+                ).await?;
+                println!("P2P quic endpoint created successfully");
                 p2p_sender.quic_listener().await?;
             } else {
                 // TURN for sending here
