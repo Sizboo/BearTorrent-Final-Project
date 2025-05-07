@@ -156,6 +156,7 @@ fn get_info_status(file_name: String, num_pieces: usize) -> Status {
         true => {
             let mut pieces= vec![0u8;num_pieces];
             info_file.write_all(&pieces).unwrap();
+            
             Status{
                 pieces_status: pieces
             }
@@ -167,13 +168,9 @@ fn get_info_status(file_name: String, num_pieces: usize) -> Status {
             
             Status{
                 pieces_status: buffer
-            }
-            
+            }       
         }
     }
-
-
-
 }
 
 // Create the cache directory for .part and .info files if it doesn't exist
@@ -217,7 +214,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
     let mut info_status = get_info_status(info_hash.name.clone(), info_hash.pieces.len());
     info_status.pieces_status[piece_index as usize] = 1u8; // Sets piece at index to true
 
-    
+    // Get the .info file and seek to the byte that represents this piece, set it to true
     let (info_file_path, is_new_info) = get_info_file(info_hash.name);
     let mut info_file = File::open(&info_file_path)?;
     info_file.seek(SeekFrom::Start(piece_index))?;
