@@ -366,7 +366,7 @@ impl TorrentClient {
             //initiate hole punch routine with other peer
             server_connection.init_punch(peer_id).await?;
             
-            sleep(Duration::from_millis(500)).await;
+            sleep(Duration::from_millis(250)).await;
             
             if let Ok(socket) = self.hole_punch(peer_addr).await {
                 let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
@@ -395,7 +395,7 @@ impl TorrentClient {
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
             // TODO remove... just needed to have this to keep the program open long enough to receive data
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
             
             println!("REQUESTER: fallback to TURN succeeded");
         }
