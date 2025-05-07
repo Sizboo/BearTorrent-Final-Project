@@ -1,5 +1,5 @@
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, PeerId};
+use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FullId, PeerId};
 
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
@@ -37,7 +37,19 @@ impl ServerConnection {
     }
 
     pub async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-
-        Ok(())
+        
+        let mut server_conn = self.client.clone();
+        
+        
+        match server_conn.update_registered_peer_id(
+            FullId { 
+                self_id: Option::from(self.uid.clone()), 
+                peer_id: Some(self_addr)
+            }
+        ).await {
+            Ok(res) => Ok(()),
+            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error>),
+        }
+        
     }
 }

@@ -10,7 +10,7 @@ use tonic::{Request, Response};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::turn_fallback::TurnFallback;
 use crate::server_connection::ServerConnection;
-use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, HolePunch};
+use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId};
 use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
 use rcgen::Error;
@@ -72,7 +72,7 @@ impl TorrentClient {
         };
         socket.set_nonblocking(true)?;
         
-        server.register_server_connection(self_addr.clone()).await?;
+        server.update_registered_peer_id(self_addr.clone()).await?;
         
         let server = server.clone();
         
@@ -188,13 +188,13 @@ impl TorrentClient {
 
             //todo REMOVE THIS and add proper ERROR CHECKING for REAL USE
             let _ = server_client.advertise(FileMessage {
-                id: torrent_client.server.uid.clone(),
+                id: Option::from(torrent_client.server.uid.clone()),
                 info_hash: 1234,
             }).await;
 
             // calls get_peer
             //todo remove unwarp error checking IS IMPORTANT HERE
-            let uid = torrent_client.server.uid.clone().unwrap();
+            let uid = torrent_client.server.uid.clone();
             println!("My Client ID: {:?}", uid);
             let response = server_client.seed(uid).await;
 
@@ -254,7 +254,7 @@ impl TorrentClient {
             let timeout_duration = Duration::from_secs(4);
             let res = timeout(
                 timeout_duration, 
-                self.server.client.await_hole_punch_trigger(self.server.uid.clone().ok_or("client id not found")? )
+                self.server.client.await_hole_punch_trigger(self.server.uid.clone() )
             ).await?;
             
             match res {
@@ -291,8 +291,7 @@ impl TorrentClient {
         if !conn_success {
       
             // TURN for sending here
-            let client_id = self.server.uid.clone()
-                .expect("server.uid must be set before calling TurnFallback::start");
+            let client_id = self.server.uid.clone();
 
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
@@ -355,11 +354,11 @@ impl TorrentClient {
             let peer_addr = SocketAddr::from((ip_addr, port));
 
             server_connection.init_punch(
-                HolePunch {
-                    self_id: server.,
+                FullId {
+                    self_id: None,
                     peer_id: None,
                 }
-            )
+            ).await?;
             
             if let Ok(socket) = self.hole_punch(peer_addr).await {
                 let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
@@ -374,8 +373,7 @@ impl TorrentClient {
         
         else {
             // TURN for receiving here
-            let client_id = self.server.uid.clone()
-                .expect("server.uid must be set before calling TurnFallback::start");
+            let client_id = self.server.uid.clone();
 
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
