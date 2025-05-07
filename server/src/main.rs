@@ -1,11 +1,9 @@
 mod turn;
 
 use std::{env, collections::HashMap, sync::Arc};
-use std::cmp::PartialEq;
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
 use tokio::sync::{Mutex, mpsc};
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FullId };
@@ -30,6 +28,7 @@ pub struct ConnectionService {
     file_tracker: Arc<Mutex<HashMap<u32, Vec<ClientId>>>>,
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
+    //todo refactor this to use a send channel
     init_hole_punch: Arc<RwLock<HashMap<PeerId, mpsc::Sender<ClientId>>>>,
 }
 
@@ -116,7 +115,7 @@ impl Connector for ConnectionService {
         
     }
     
-    ///init hole punch is used to notify a seeding peer that they should begin the udp hole punching procedure.
+    /// init_hole_punch() is used to notify a seeding peer that they should begin the udp hole punching procedure.
     /// This function should be called right before the calling peer initiates their own hole punching procedure
     /// as UDP hole punching is time-sensitive.
     async fn init_punch(&self, request: Request<FullId>) -> Result<Response<()>, Status> {
