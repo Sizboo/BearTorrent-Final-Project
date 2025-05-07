@@ -1,5 +1,6 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Connection, Endpoint, TokioRuntime};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -7,6 +8,7 @@ use crate::server_connection::ServerConnection;
 use crate::torrent_client::TorrentClient;
 use crate::connection::connection::{PeerId, CertMessage, Cert};
 use tokio::net::UdpSocket as TokioUdpSocket;
+use tokio::time::timeout;
 use tonic::Request;
 
 pub struct QuicP2PConn {
@@ -132,22 +134,35 @@ impl QuicP2PConn {
             private_key: None,
         })
     }
+    
+    //todo quic_listener will have to take channel_rx and pass to send_data to send data from connection to our implementation
     pub(crate) async fn quic_listener(&self)
     -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
-        println!("Listening on {:?}", self.endpoint.local_addr());
-        let conn = conn_listener.await?;
-        println!("Connection received on {:?}", self.endpoint.local_addr());
-        let send_task = tokio::spawn(async move {
-            let res = QuicP2PConn::send_data(conn).await;
-            if res.is_err() {
-                eprintln!("QuicP2PConn::send_data failed {:?}", res);
-            }
-        });
         
-        send_task.await?;
-        Ok(())
+        //establish timeout duration to exit if connection request is not received
+        let timeout_duration = Duration::from_secs(4);
 
+        println!("Listening on {:?}", self.endpoint.local_addr());
+        let res = timeout(timeout_duration,conn_listener).await?;
+        
+        match res {
+            Ok(conn) => {
+                let send_task = tokio::spawn(async move {
+                    let res = QuicP2PConn::send_data(conn).await;
+                    if res.is_err() {
+                        eprintln!("QuicP2PConn::send_data failed {:?}", res);
+                    }
+                });
+
+                println!("Connection received on {:?}", self.endpoint.local_addr());
+                send_task.await?;
+                Ok(())
+            },
+            Err(e) => {
+                return Err(Box::new(e));
+            }
+        }
     }
     
     async fn send_data(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
@@ -165,16 +180,30 @@ impl QuicP2PConn {
 
     pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr)
     -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
-        let read_task = tokio::spawn(async move {
-            let res = QuicP2PConn::recv_data(conn).await;
-            if res.is_err() {
-                eprintln!("QuicP2PConn::recv_data failed {:?}", res);
-            }
-        });
 
-        read_task.await?;
-        Ok(())
+        // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
+        let timeout_duration = Duration::from_secs(4);
+        
+        let res = timeout(timeout_duration,self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?).await?;
+        
+        match res {
+            Ok(conn) => {
+                let read_task = tokio::spawn(async move {
+                    let res = QuicP2PConn::recv_data(conn).await;
+                    if res.is_err() {
+                        eprintln!("QuicP2PConn::recv_data failed {:?}", res);
+                    }
+                });
+
+                read_task.await?;
+                Ok(()) 
+            }
+            Err(e) => {
+                return Err(Box::new(e));
+            }
+            
+        }
+        
     }
     
     async fn recv_data(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {

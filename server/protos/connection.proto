@@ -4,9 +4,12 @@ package connection;
 
 service Connector {
     rpc send_file_request (FileMessage) returns (PeerList);
-    rpc get_peer (ClientId) returns (PeerId);
+    rpc seed (ClientId) returns (PeerId);
+    rpc await_hole_punch_trigger (PeerId) returns (google.protobuf.Empty);
+    rpc init_punch (PeerId) returns (google.protobuf.Empty);
     rpc advertise (FileMessage) returns(ClientId);
-    rpc register_client (PeerId) returns (ClientId);
+    rpc register_client (ClientRegistry) returns (ClientId);
+    rpc update_registered_peer_id (FullId) returns (ClientId);
     rpc init_cert_sender (PeerId) returns (google.protobuf.Empty);
     rpc get_cert (PeerId) returns (Cert);
     rpc send_cert (CertMessage) returns (google.protobuf.Empty);
@@ -26,12 +29,20 @@ message ClientId {
     string uid = 1;
 }
 
-//todo change this so we can make a tcp connection
+message ClientRegistry {
+    optional PeerId peer_id = 1;
+}
+
 message PeerId {
     uint32 ipaddr = 1;
     uint32 port = 2;
     uint32 priv_ipaddr = 3;
     uint32 priv_port = 4;
+}
+
+message FullId {
+    ClientId self_id = 1;
+    PeerId peer_id = 2;
 }
 
 message FileMessage {

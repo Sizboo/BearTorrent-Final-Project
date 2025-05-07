@@ -2,6 +2,7 @@ use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, transport::Channel};
 use crate::connection::connection::{ClientId, TurnPacket, turn_client};
+use crate::data_router::SocketData;
 
 
 // we will use this to manage TURN if we need it as a fallback
@@ -12,8 +13,9 @@ pub struct TurnFallback {
 
 impl TurnFallback {
     pub async fn start(
-        mut client: turn_client::TurnClient<Channel>, // TorrentClient.server.turn
+        mut turn_client: turn_client::TurnClient<Channel>, // TorrentClient.server.turn
         self_id: ClientId,
+        handler_tx: mpsc::Sender<SocketData>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
@@ -31,16 +33,15 @@ impl TurnFallback {
         // it might be helpful later on... or not idk, but we have it lol
 
         // get our inbound data stream
-        let resp = client.relay(Request::new(outbound)).await?;
+        let resp = turn_client.relay(Request::new(outbound)).await?;
         let mut inbound = resp.into_inner();
 
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
                 let from = pkt.client_id.unwrap();
 
-                // TODO pass off pkt.data to data handler when we make one
-                let payload = String::from_utf8_lossy(&pkt.payload);
-                println!("from = {}, payload = {}", from.uid, payload);
+                // send received data off to our data handler
+                handler_tx.send(SocketData {data: pkt.payload}).await;
             }
         });
 
