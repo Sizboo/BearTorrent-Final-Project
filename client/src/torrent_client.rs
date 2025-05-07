@@ -393,7 +393,7 @@ impl TorrentClient {
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
             // TODO remove... just needed to have this to keep the program open long enough to receive data
-            tokio::time::sleep(Duration::from_millis(10000)).await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
             
             println!("REQUESTER: fallback to TURN succeeded");
         }
