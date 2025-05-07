@@ -5,7 +5,6 @@ use stunclient::StunClient;
 use tokio::{net::UdpSocket, sync::mpsc};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_stream::StreamExt;
 use tonic::{Request, Response};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::turn_fallback::TurnFallback;
@@ -228,7 +227,6 @@ impl TorrentClient {
 
         //1. try connection over local NAT
         if self.self_addr.ipaddr == peer_id.ipaddr {
-            // println!("Returned value {:?}", socket);
             //start quick server
             let socket = self.priv_socket.take().unwrap();
             let p2p_sender = QuicP2PConn::create_quic_server(
@@ -238,12 +236,15 @@ impl TorrentClient {
                 self.server.clone(), 
                 Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string()
             ).await?;
-            println!("P2P quic endpoint created successfully");
+            // println!("P2P quic endpoint created successfully");
             let res = p2p_sender.quic_listener().await;
             match res {
-                Ok(()) => conn_success = true,
+                Ok(()) => {
+                    println!("SEEDER: Quic connection within LAN success!");
+                    conn_success = true
+                },
                 Err(e) => {
-                    println!("LAN based quic connection failed");
+                    println!("SEEDER: LAN based quic connection failed");
                     conn_success = false;
                 }
             }
@@ -254,13 +255,13 @@ impl TorrentClient {
             let timeout_duration = Duration::from_secs(4);
             let res = timeout(
                 timeout_duration, 
-                self.server.client.await_hole_punch_trigger(self.server.uid.clone() )
+                self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
             ).await?;
             
             match res {
                 Ok(_) => {
                     if let Ok(socket) = self.hole_punch(peer_addr).await {
-                        println!("Returned value {:?}", socket);
+                        // println!("Returned value {:?}", socket);
                         //start quick server
                         let p2p_sender = QuicP2PConn::create_quic_server(
                             self,
@@ -269,11 +270,14 @@ impl TorrentClient {
                             self.server.clone(),
                             Ipv4Addr::from(self.self_addr.ipaddr).to_string()
                         ).await?;
-                        println!("P2P quic endpoint across NAT created successfully");
+                        // println!("SEEDER: P2P quic endpoint across NAT created successfully");
                         match p2p_sender.quic_listener().await {
-                            Ok(()) => conn_success = true,
+                            Ok(()) => {
+                                println!("SEEDER: Quic connection across NAT successful!");
+                                conn_success = true
+                            },
                             Err(e) => {
-                                println!("Connection across NAT after hole punch failed");
+                                println!("SEEDER: Connection across NAT after hole punch failed");
                                 conn_success = false;
                             }
                         }
@@ -281,7 +285,7 @@ impl TorrentClient {
                 },
                 Err(e) => {
                     conn_success = false;
-                    println!("Failed to receive hole punch trigger");
+                    println!("SEEDER: Failed to receive hole punch trigger");
                 }
             }
         
@@ -303,6 +307,7 @@ impl TorrentClient {
 
             tokio::time::sleep(Duration::from_millis(1000)).await;
             fallback.send_to(target, buf).await?;
+            println!("SEEDER fallback to TURN")
         }
 
         Ok(())
@@ -331,7 +336,6 @@ impl TorrentClient {
         server_connection.init_cert_sender(self.self_addr).await?;
         let mut conn_success = false;
 
-        //todo refactor for final implementation
         if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
             let port = peer_id.priv_port as u16;
@@ -340,9 +344,12 @@ impl TorrentClient {
 
             let p2p_conn = QuicP2PConn::create_quic_client(priv_socket, self.self_addr, self.server.clone()).await?;
             match p2p_conn.connect_to_peer_server(lan_peer_addr).await {
-                Ok(()) => conn_success = true,
+                Ok(()) => {
+                    println!("REQUESTER: successful connection within LAN");
+                    conn_success = true
+                },
                 Err(_) => {
-                    println!("Requesting Peer connect over LAN failed");
+                    println!("REQUESTER: connect over LAN failed");
                     conn_success = false;
                 }
             }
@@ -353,12 +360,11 @@ impl TorrentClient {
             let port = peer_id.port as u16;
             let peer_addr = SocketAddr::from((ip_addr, port));
 
-            server_connection.init_punch(
-                FullId {
-                    self_id: None,
-                    peer_id: None,
-                }
-            ).await?;
+            //add pause to give other peer time to wait on notify handle
+            sleep(Duration::from_millis(1000)).await;
+            
+            //initiate hole punch routine with other peer
+            server_connection.init_punch(peer_id).await?;
             
             if let Ok(socket) = self.hole_punch(peer_addr).await {
                 let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
@@ -366,12 +372,21 @@ impl TorrentClient {
                 let peer_addr = SocketAddr::from((ip_addr, port));
 
                 let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr, self.server.clone()).await?;
-                p2p_conn.connect_to_peer_server(peer_addr).await?;
+                match p2p_conn.connect_to_peer_server(peer_addr).await {
+                    Ok(()) => {
+                        println!("REQUESTER: successful connection across NAT");
+                        conn_success = true
+                    },
+                    Err(_) => {
+                        println!("REQUESTER: connect across NAT failed");
+                        conn_success = false;
+                    }
+                }
             } 
         }
             
         
-        else {
+        if !conn_success {
             // TURN for receiving here
             let client_id = self.server.uid.clone();
 
@@ -379,6 +394,8 @@ impl TorrentClient {
 
             // TODO remove... just needed to have this to keep the program open long enough to receive data
             tokio::time::sleep(Duration::from_millis(10000)).await;
+            
+            println!("REQUESTER: fallback to TURN succeeded");
         }
 
         Ok(())
