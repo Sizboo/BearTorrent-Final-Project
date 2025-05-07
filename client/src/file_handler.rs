@@ -33,7 +33,7 @@ impl InfoHash {
 
         println!("File length: {}", file_length);
         println!("Piece length: {}", piece_length);
-        println!("Pieces: {:?}", pieces);
+        println!("Pieces: {:x?}", pieces);
         println!("File name: {}", name);
 
         Ok(InfoHash{
@@ -114,8 +114,8 @@ impl InfoHash {
 
 // Checks if a file exists, if it doesn't then it is created.
 // Returns the PathBuf to this file
-fn get_temp_file(file_name: String, extension: String) -> std::io::Result<(PathBuf, bool)> {
-    let temp_file_name = format!("resources/files/{}.{}", file_name, extension);
+fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::Result<(PathBuf, bool)> {
+    let temp_file_name = format!("resources/{}/{}.{}", src, file_name, extension);
     let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
         Ok(true) => (PathBuf::from(temp_file_name), true),
         Ok(false) => {
@@ -129,12 +129,12 @@ fn get_temp_file(file_name: String, extension: String) -> std::io::Result<(PathB
 
 // Get the .part of the specified file
 fn get_part_file(file_name: String) -> PathBuf {
-    let (path, is_new) = get_temp_file(file_name, "part".to_string()).unwrap();
+    let (path, is_new) = get_temp_file(file_name, "part".to_string(), "cache".to_string()).unwrap();
     path
 }
 
 fn get_info_file(file_name: String) -> (PathBuf, bool) {
-    let (path, is_new) = get_temp_file(file_name, "info".to_string()).unwrap();
+    let (path, is_new) = get_temp_file(file_name, "info".to_string(), "cache".to_string()).unwrap();
     (path, is_new)
 }
 
@@ -156,7 +156,7 @@ fn get_info_status(file_name: String, num_pieces: usize) -> Status {
         true => {
             let mut pieces= vec![0u8;num_pieces];
             info_file.write_all(&pieces).unwrap();
-            
+
             Status{
                 pieces_status: pieces
             }
@@ -165,10 +165,10 @@ fn get_info_status(file_name: String, num_pieces: usize) -> Status {
         false => {
             let mut buffer: Vec<u8> = Vec::new();
             info_file.read_to_end(&mut buffer).unwrap();
-            
+
             Status{
                 pieces_status: buffer
-            }       
+            }
         }
     }
 }
@@ -209,7 +209,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
     part_file.seek(SeekFrom::Start((piece_index) * info_hash.piece_length ))?;
     part_file.write_all(&piece)?;
     part_file.flush()?;
-    
+
     // Update the status of the piece within the .info file
     let mut info_status = get_info_status(info_hash.name.clone(), info_hash.pieces.len());
     info_status.pieces_status[piece_index as usize] = 1u8; // Sets piece at index to true
@@ -220,7 +220,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
     info_file.seek(SeekFrom::Start(piece_index))?;
     info_file.write_all(&[1u8])?;
     info_file.flush()?;
-    
+
     Ok(())
 
 }
@@ -245,6 +245,14 @@ pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
             results.push(InfoHash::new(file)?)
         }
     }
+    
+    let mut buf: Vec<u8> = Vec::new();
+    buf.push(128);
+    for info_hash in results {
+        write_piece_to_part(info_hash, buf.clone(), 0u64)?
+    }
+    
+    let mut results: Vec<InfoHash> = Vec::new();
 
     // Return the list of hashes
     Ok(results)
