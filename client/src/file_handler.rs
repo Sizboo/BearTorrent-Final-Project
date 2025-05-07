@@ -1,6 +1,6 @@
-use std::fs::{DirEntry, File, read_dir, create_dir, exists};
+use std::fs::{DirEntry, File, read_dir, create_dir, exists, create_dir_all, write};
 use sha1::{Sha1, Digest};
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -9,6 +9,10 @@ pub struct InfoHash{
     file_length: u64, // Size of the file in bytes
     piece_length: u64, // Number of bytes per piece
     pieces: Vec<[u8;20]>, // hash list of the pieces
+}
+
+pub struct Status{
+    pieces_status: Vec<bool>
 }
 
 impl InfoHash {
@@ -106,22 +110,91 @@ impl InfoHash {
     }
 }
 
+// Checks if a file exists, if it doesn't then it is created.
+// Returns the PathBuf to this file
+fn get_temp_file(file_name: String, extension: String) -> std::io::Result<(PathBuf)> {
+    let temp_file_name = format!("resources/files/{}.{}", file_name, extension);
+    let temp_file = match exists(Path::new(&temp_file_name)) {
+        Ok(true) => PathBuf::from(temp_file_name),
+        Ok(false) => {
+            File::create(&temp_file_name)?;
+            PathBuf::from(temp_file_name)
+        }
+        Err(e) => return Err(e),
+    };
+    Ok(temp_file)
+}
+
+// Get the .info of the specified file
+fn get_info_file(file_name: String) -> std::io::Result<(PathBuf)> {
+    get_temp_file(file_name, "info".to_string())    
+}
+
+// Get the .part of the specified file
+fn get_part_file(file_name: String) -> std::io::Result<(PathBuf)> {
+    get_temp_file(file_name, "part".to_string())
+}
+// Create the files directory if it doesn't exist
+fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
+    let dir = match create_dir_all("resources/files"){
+        Ok(dir) => PathBuf::from("resources/files"),
+        Err(e) => return Err(e),
+    };
+    Ok(dir)
+}
+
+// Create the cache directory for .part and .info files if it doesn't exist
+fn get_client_cache_dir() -> std::io::Result<(PathBuf)> {
+    let cache = match create_dir_all("resources/cache") {
+        Ok(c) => PathBuf::from("resources/cache"),
+        Err(e) => return Err(e),
+    };
+    Ok(cache)
+}
+
+// Checks the client for resources directory containing cache and files.
+// If they don't exist, they are created.
+fn verify_client_dir_setup() -> () {
+    // Create the cache directory for .part and .info files
+    let cache = get_client_cache_dir();
+    
+    // Create the files directory if it doesn't exist
+    let dir = get_client_files_dir();
+}
+
+
+// This function writes a piece to a .part file
+pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_index: u64) -> std::io::Result<()> {
+    // Verify cache directory exists
+    let dir = get_client_cache_dir()?;
+    
+    // Creates the .part file if it doesn't exist, returns PathBuf of this file
+    let mut part_file_path = get_part_file(info_hash.name)?;
+    
+    // Open the .part file
+    let mut part_file = File::open(&part_file_path)?;
+    
+    // Seek to the index we need to write to, write the piece, flush the buffer
+    // TODO check that seeking ahead in an empty file doesn't cause issues
+    part_file.seek(SeekFrom::Start((piece_index) * info_hash.piece_length ))?;
+    part_file.write_all(&piece)?;
+    part_file.flush()?;
+    
+    
+    
+    Ok(())
+    
+}
+
 // This function goes through the client's resource directory
 // to generate info hashes for each file
 // Returns: Vec<InfoHash>
 pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
     let mut results: Vec<InfoHash> = Vec::new();
     
-    // Get the path of the client's resources.
-    // If it doesn't exist, it is created. 
-    let dir = match exists("resources"){
-        Ok(true) => PathBuf::from("resources"),
-        Ok(false) => {
-            create_dir("resources")?;
-            PathBuf::from("resources")
-        }
-        Err(e) => Err(e)?
-    };
+    // Verify resources are set up, fetch downloaded files PathBuf
+    verify_client_dir_setup();
+    let dir = get_client_files_dir();
 
     // For each file in "/resources", request the hash and append to results
     for file in read_dir(dir)? {
