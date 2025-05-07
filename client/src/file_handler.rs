@@ -1,4 +1,4 @@
-use std::fs::{DirEntry, File, read_dir, create_dir, exists, create_dir_all, write};
+use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions};
 use sha1::{Sha1, Digest};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -150,11 +150,11 @@ fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
 // Returns the Status struct that represents the status of the file download
 fn get_info_status(file_name: String, num_pieces: usize) -> Status {
     let (path, is_new) = get_info_file(file_name);
-    let mut info_file = File::open(&path).unwrap();
+    let mut info_file = OpenOptions::new().write(true).create(true).open(&path).unwrap();
     match is_new {
         // If the .info has never been generated before, construct the file
         true => {
-            let mut pieces= vec![0u8;num_pieces];
+            let pieces= vec![0u8;num_pieces];
             info_file.write_all(&pieces).unwrap();
 
             Status{
@@ -202,7 +202,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
     let part_path = get_part_file(info_hash.name.clone());
 
     // Open the .part file
-    let mut part_file = File::open(&part_path)?;
+    let mut part_file = OpenOptions::new().write(true).create(true).open(&part_path)?;
 
     // Seek to the index we need to write to, write the piece, flush the buffer
     // TODO check that seeking ahead in an empty file doesn't cause issues
@@ -246,13 +246,13 @@ pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
         }
     }
     
-    // let mut buf: Vec<u8> = Vec::new();
-    // buf.push(128);
-    // for info_hash in results {
-    //     write_piece_to_part(info_hash, buf.clone(), 0u64)?
-    // }
-    // 
-    // let mut results: Vec<InfoHash> = Vec::new();
+    let mut buf: Vec<u8> = Vec::new();
+    buf.push(128);
+    for info_hash in results {
+        write_piece_to_part(info_hash, buf.clone(), 0u64)?
+    }
+    
+    let mut results: Vec<InfoHash> = Vec::new();
 
     // Return the list of hashes
     Ok(results)
