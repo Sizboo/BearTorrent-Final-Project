@@ -3,7 +3,7 @@ mod turn;
 use std::{env, collections::HashMap, sync::Arc};
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, Notify};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FullId };
@@ -25,11 +25,11 @@ struct Seeder {
 #[derive(Debug, Default)]
 pub struct ConnectionService {
     client_registry: Arc<RwLock<HashMap<ClientId, Option<PeerId>>>>,
-    file_tracker: Arc<Mutex<HashMap<u32, Vec<ClientId>>>>,
+    file_tracker: Arc<Mutex<HashMap<u32, Vec<Seeder>>>>,
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
     //todo refactor this to use a send channel
-    init_hole_punch: Arc<RwLock<HashMap<PeerId, mpsc::Sender<ClientId>>>>,
+    init_hole_punch: Arc<RwLock<HashMap<PeerId,Arc<Notify>>>>,
 }
 
 impl ConnectionService {
@@ -51,23 +51,18 @@ impl Connector for ConnectionService {
 
         // notify all seeders of the file
         if let Some(seeders) = file_tracker.get_mut(&r.info_hash) {
-            // //todo implement this so that it selects specific peers (or pieces out file)
-            // for seeder in seeders.iter_mut() {
-            //     
-            //     // let res = seeder.notify.send(requester.clone()).await;
-            //     
-            //     // if res.is_err() {
-            //     //     return Err(Status::internal("failed to send to seeder"))?
-            //     // }
-            // }
-            // 
-            // // returns a list of all peers that have a file
-            // //todo this needs to send THE seeder/s that are sharing for hole punching, not necessarily everyone with file
-            
+            for seeder in seeders.iter_mut() {
+                
+                let res = seeder.notify.send(requester.clone()).await;
+                
+                if res.is_err() {
+                    return Err(Status::internal("failed to send to seeder"))?
+                }
+            }
             
             let map = self.client_registry.read().await;
             // todo maybe resolve unwarp here
-            let peer_list = seeders.iter().filter_map( |s| map.get(&s).cloned().unwrap()).collect();
+            let peer_list = seeders.iter().filter_map( |s| map.get(&s.client_id).cloned().unwrap()).collect();
             
             
             Ok(Response::new(PeerList { list: peer_list }))
@@ -102,15 +97,16 @@ impl Connector for ConnectionService {
     /// When this method returns, it indicates the requesting client is beginning its hole punch sequence. 
     async fn await_hole_punch_trigger(
         &self,
-        request: Request<ClientId>,
+        request: Request<PeerId>,
     ) -> Result<Response<()>, Status> {
         let self_id = request.into_inner();
 
-        return match self.send_tracker.lock().await.get_mut(&self_id) {
-            Some(recv) => {
+        match self.init_hole_punch.read().await.get(&self_id).cloned().ok_or(Status::internal("failed to get self_id")) {
+            Ok(notify_handle) => {
+                notify_handle.notified().await;
                 Ok(Response::new(()))
             },
-            None => Err(Status::internal("Await hole punch does not have receiving channel")),
+            Err(e) => Err(Status::internal(e.to_string())),
         }
         
     }
@@ -118,18 +114,17 @@ impl Connector for ConnectionService {
     /// init_hole_punch() is used to notify a seeding peer that they should begin the udp hole punching procedure.
     /// This function should be called right before the calling peer initiates their own hole punching procedure
     /// as UDP hole punching is time-sensitive.
-    async fn init_punch(&self, request: Request<FullId>) -> Result<Response<()>, Status> {
+    async fn init_punch(&self, request: Request<PeerId>) -> Result<Response<()>, Status> {
        
-        let req = request.into_inner();
-        let peer_id = req.peer_id.ok_or(Status::invalid_argument("peer id not provided"))?;
-        let self_id = req.self_id.ok_or(Status::invalid_argument("self id not provided"))?;
+        let peer_id = request.into_inner();
+  
         
         match self.init_hole_punch.read().await.get(&peer_id).cloned() {
             None => {
                 Err(Status::internal("no seeding peer"))?;
             }
-            Some(sender) => {
-               sender.send(self_id).await.map_err(|_| Status::internal("failed to send self id to hole punch peer"))?;
+            Some(notify_handle) => {
+               notify_handle.notify_waiters();
             }
         }
         
@@ -153,15 +148,14 @@ impl Connector for ConnectionService {
         let (tx, rx) = mpsc::channel(1);
 
         let mut file_tracker = self.file_tracker.lock().await;
-        // file_tracker.entry(r.info_hash).or_default().push(Seeder {
-        //     client_id: client_id.clone(),
-        //     notify: tx,
-        // });
+        file_tracker.entry(r.info_hash).or_default().push(Seeder {
+            client_id: client_id.clone(),
+            notify: tx,
+        });
         
-        file_tracker.entry(r.info_hash).or_default().push(client_id.clone());
        
-        let peer_id = self.client_registry.read().await.get(&client_id).cloned()
-            .ok_or(Status::invalid_argument("failed to get peer id in advertise"))?;
+        // let peer_id = self.client_registry.read().await.get(&client_id).cloned()
+        //     .ok_or(Status::invalid_argument("failed to get peer id in advertise"))?;
         
         //todo fix this 
         // self.init_hole_punch.write().await.insert(peer_id, tx);
@@ -208,6 +202,8 @@ impl Connector for ConnectionService {
         let peer_id = r.peer_id.ok_or(Status::invalid_argument("peer id not provided"))?;
         
         self.client_registry.write().await.insert(self_id.clone(), Some(peer_id));
+        
+        self.init_hole_punch.write().await.insert(peer_id,Arc::new(Notify::new()));
         
         Ok(Response::new(self_id))
     
