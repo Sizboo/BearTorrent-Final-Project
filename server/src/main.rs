@@ -83,11 +83,6 @@ impl Connector for ConnectionService {
     async fn seed(&self, request: Request<ClientId>) -> Result<Response<PeerId>, Status> {
         let client_id = request.into_inner(); 
         
-        //todo if we implement states (offline, seeding) should first update its state on server to sharing
-        // any time in offline status it will not be selected
-
-
-        
         match self.send_tracker.lock().await.get_mut(&client_id) {
             Some(recv) => {
                 let client_id = recv.recv().await
@@ -100,8 +95,24 @@ impl Connector for ConnectionService {
             }
             None => Err(Status::internal("dropped")),
         }
+    }
+    
+    /// await_trigger_hole_punch() should be used by the sending peer (ie the peer with the data)
+    /// and awaited to initiate its hole punch sequence. 
+    /// When this method returns, it indicates the requesting client is beginning its hole punch sequence. 
+    async fn await_hole_punch_trigger(
+        &self,
+        request: Request<ClientId>,
+    ) -> Result<Response<()>, Status> {
+        let self_id = request.into_inner();
 
-
+        return match self.send_tracker.lock().await.get_mut(&self_id) {
+            Some(recv) => {
+                Ok(Response::new(()))
+            },
+            None => Err(Status::internal("Await hole punch does not have receiving channel")),
+        }
+        
     }
     
     ///init hole punch is used to notify a seeding peer that they should begin the udp hole punching procedure

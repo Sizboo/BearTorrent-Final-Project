@@ -5,6 +5,7 @@ package connection;
 service Connector {
     rpc send_file_request (FileMessage) returns (PeerList);
     rpc seed (ClientId) returns (PeerId);
+    rpc await_hole_punch_trigger (ClientId) returns (google.protobuf.Empty);
     rpc init_punch (HolePunch) returns (google.protobuf.Empty);
     rpc advertise (FileMessage) returns(ClientId);
     rpc register_client (PeerId) returns (ClientId);

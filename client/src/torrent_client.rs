@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
 use stunclient::StunClient;
@@ -12,6 +13,7 @@ use crate::server_connection::ServerConnection;
 use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList};
 use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
+use rcgen::Error;
 use tokio::time::{sleep, timeout};
 use crate::file_handler::{get_info_hashes, InfoHash};
 use crate::data_router::*;
@@ -218,6 +220,7 @@ impl TorrentClient {
         let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let pub_port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
+        let mut conn_success = false;
 
 
         println!("peer to send {:?}", peer_id);
@@ -235,13 +238,25 @@ impl TorrentClient {
                 Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string()
             ).await?;
             println!("P2P quic endpoint created successfully");
-            p2p_sender.quic_listener().await?;
+            let res = p2p_sender.quic_listener().await;
+            match res {
+                Ok(()) => conn_success = true,
+                Err(e) => {
+                    println!("LAN based quic connection failed");
+                    conn_success = false;
+                }
+            }
         }
-
+        
+        if !conn_success {
+            let timeout_duration = Duration::from_secs(4);
+            timeout(timeout_duration)
+        
+        }
+            
         //todo 2. try hole punch
             //todo refactor this so that it falls back on turn no matter what
         else {
-            self.server.client.init_cert_sender(peer_id).await?;
             if let Ok(socket) = self.hole_punch(peer_addr).await {
                 println!("Returned value {:?}", socket);
                 //start quick server

@@ -134,13 +134,14 @@ impl QuicP2PConn {
             private_key: None,
         })
     }
+    
+    //todo quic_listener will have to take channel_rx and pass to send_data to send data from connection to our implementation
     pub(crate) async fn quic_listener(&self)
     -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
         
         //establish timeout duration to exit if connection request is not received
         let timeout_duration = Duration::from_secs(4);
-
 
         println!("Listening on {:?}", self.endpoint.local_addr());
         let res = timeout(timeout_duration,conn_listener).await?;
@@ -181,17 +182,28 @@ impl QuicP2PConn {
     -> Result<(), Box<dyn std::error::Error>> {
 
         // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
+        let timeout_duration = Duration::from_secs(4);
+        
+        let res = timeout(timeout_duration,self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?).await?;
+        
+        match res {
+            Ok(conn) => {
+                let read_task = tokio::spawn(async move {
+                    let res = QuicP2PConn::recv_data(conn).await;
+                    if res.is_err() {
+                        eprintln!("QuicP2PConn::recv_data failed {:?}", res);
+                    }
+                });
 
-        let conn = self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?.await?;
-        let read_task = tokio::spawn(async move {
-            let res = QuicP2PConn::recv_data(conn).await;
-            if res.is_err() {
-                eprintln!("QuicP2PConn::recv_data failed {:?}", res);
+                read_task.await?;
+                Ok(()) 
             }
-        });
-
-        read_task.await?;
-        Ok(())
+            Err(e) => {
+                return Err(Box::new(e));
+            }
+            
+        }
+        
     }
     
     async fn recv_data(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
