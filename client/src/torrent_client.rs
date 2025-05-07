@@ -1,17 +1,18 @@
+use std::any::Any;
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
 use stunclient::StunClient;
 use tokio::{net::UdpSocket, sync::mpsc};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_stream::StreamExt;
 use tonic::{Request, Response};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::turn_fallback::TurnFallback;
 use crate::server_connection::ServerConnection;
-use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList};
+use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId};
 use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
+use rcgen::Error;
 use tokio::time::{sleep, timeout};
 use crate::file_handler::{get_info_hashes, InfoHash};
 use crate::data_router::*;
@@ -36,7 +37,7 @@ impl TorrentClient {
         let client = StunClient::new(stun_server);
         let external_addr = client.query_external_address(&socket)?;
 
-        let pub_ipaddr =  match external_addr.ip() {
+        let ipaddr =  match external_addr.ip() {
             IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
             IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
         }?;
@@ -63,14 +64,14 @@ impl TorrentClient {
         let priv_socket = UdpSocket::bind(SocketAddrV4::new(priv_ipaddr, priv_port)).await?;
 
         let self_addr = PeerId {
-            pub_ipaddr,
-            pub_port: external_addr.port() as u32,
+            ipaddr,
+            port: external_addr.port() as u32,
             priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
             priv_port: priv_port as u32,
         };
         socket.set_nonblocking(true)?;
         
-        server.register_server_connection(self_addr.clone()).await?;
+        server.update_registered_peer_id(self_addr.clone()).await?;
         
         let server = server.clone();
         
@@ -186,15 +187,15 @@ impl TorrentClient {
 
             //todo REMOVE THIS and add proper ERROR CHECKING for REAL USE
             let _ = server_client.advertise(FileMessage {
-                id: torrent_client.server.uid.clone(),
+                id: Option::from(torrent_client.server.uid.clone()),
                 info_hash: 1234,
             }).await;
 
             // calls get_peer
             //todo remove unwarp error checking IS IMPORTANT HERE
-            let uid = torrent_client.server.uid.clone().unwrap();
+            let uid = torrent_client.server.uid.clone();
             println!("My Client ID: {:?}", uid);
-            let response = server_client.get_peer(uid).await;
+            let response = server_client.seed(uid).await;
 
             // waits for response from get_peer
             match response {
@@ -215,33 +216,86 @@ impl TorrentClient {
     
     pub async fn connect_to_peer(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
         let peer_id = res.into_inner();
-        let pub_ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
-        let pub_port = peer_id.pub_port as u16;
+        let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+        let pub_port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
+        let mut conn_success = false;
+        
 
 
         println!("peer to send {:?}", peer_id);
 
-        //todo 1. try connection over local NAT
-        if self.self_addr.pub_ipaddr == peer_id.pub_ipaddr {
-            // println!("Returned value {:?}", socket);
+        //1. try connection over local NAT
+        if self.self_addr.ipaddr == peer_id.ipaddr {
             //start quick server
             let socket = self.priv_socket.take().unwrap();
-            let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string()).await?;
-            println!("P2P endpoint created successfully");
-            p2p_sender.quic_listener().await?;
+            let p2p_sender = QuicP2PConn::create_quic_server(
+                self, 
+                socket, 
+                peer_id, 
+                self.server.clone(), 
+                Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string()
+            ).await?;
+            // println!("P2P quic endpoint created successfully");
+            let res = p2p_sender.quic_listener().await;
+            match res {
+                Ok(()) => {
+                    println!("SEEDER: Quic connection within LAN success!");
+                    conn_success = true
+                },
+                Err(e) => {
+                    println!("SEEDER: LAN based quic connection failed");
+                    conn_success = false;
+                }
+            }
         }
-
-        //todo 2. try hole punch
-        else if let Ok(socket) = self.hole_punch(peer_addr).await {
-            println!("Returned value {:?}", socket);
-            //start quick server
-            let p2p_sender = QuicP2PConn::create_quic_server(self, socket, peer_id, self.server.clone(), Ipv4Addr::from(self.self_addr.pub_ipaddr).to_string()).await?;
-            p2p_sender.quic_listener().await?;
-        } else {
+        
+        //2. try connection across NAT
+        if !conn_success {
+            let timeout_duration = Duration::from_secs(4);
+            let res = timeout(
+                timeout_duration, 
+                self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
+            ).await?;
+            
+            match res {
+                Ok(_) => {
+                    if let Ok(socket) = self.hole_punch(peer_addr).await {
+                        // println!("Returned value {:?}", socket);
+                        //start quick server
+                        let p2p_sender = QuicP2PConn::create_quic_server(
+                            self,
+                            socket,
+                            peer_id,
+                            self.server.clone(),
+                            Ipv4Addr::from(self.self_addr.ipaddr).to_string()
+                        ).await?;
+                        // println!("SEEDER: P2P quic endpoint across NAT created successfully");
+                        match p2p_sender.quic_listener().await {
+                            Ok(()) => {
+                                println!("SEEDER: Quic connection across NAT successful!");
+                                conn_success = true
+                            },
+                            Err(e) => {
+                                println!("SEEDER: Connection across NAT after hole punch failed");
+                                conn_success = false;
+                            }
+                        }
+                    } 
+                },
+                Err(e) => {
+                    conn_success = false;
+                    println!("SEEDER: Failed to receive hole punch trigger");
+                }
+            }
+        
+        }
+            
+        // Fall back connection on TURN
+        if !conn_success {
+      
             // TURN for sending here
-            let client_id = self.server.uid.clone()
-                .expect("server.uid must be set before calling TurnFallback::start");
+            let client_id = self.server.uid.clone();
 
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
@@ -253,6 +307,7 @@ impl TorrentClient {
 
             tokio::time::sleep(Duration::from_millis(1000)).await;
             fallback.send_to(target, buf).await?;
+            println!("SEEDER fallback to TURN")
         }
 
         Ok(())
@@ -275,42 +330,74 @@ impl TorrentClient {
 
     ///Used when client is requesting a file
     pub async fn get_file_from_peer(&mut self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-        let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
-        let port = peer_id.pub_port as u16;
-        let peer_addr = SocketAddr::from((ip_addr, port));
-       
+        
+        //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
+        let mut conn_success = false;
 
-        //todo refactor for final implementation
-        if self.self_addr.pub_ipaddr == peer_id.pub_ipaddr {
+        if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
             let port = peer_id.priv_port as u16;
             let lan_peer_addr = SocketAddr::from((ip_addr, port));
             let priv_socket = self.priv_socket.take().unwrap();
 
             let p2p_conn = QuicP2PConn::create_quic_client(priv_socket, self.self_addr, self.server.clone()).await?;
-            p2p_conn.connect_to_peer_server(lan_peer_addr).await?;
+            match p2p_conn.connect_to_peer_server(lan_peer_addr).await {
+                Ok(()) => {
+                    println!("REQUESTER: successful connection within LAN");
+                    conn_success = true
+                },
+                Err(_) => {
+                    println!("REQUESTER: connect over LAN failed");
+                    conn_success = false;
+                }
+            }
         }
 
-            //init the map so cert can be retrieved
-
-        if let Ok(socket) = self.hole_punch(peer_addr).await {
-            let ip_addr = Ipv4Addr::from(peer_id.pub_ipaddr);
-            let port = peer_id.pub_port as u16;
+        if !conn_success {
+            let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+            let port = peer_id.port as u16;
             let peer_addr = SocketAddr::from((ip_addr, port));
 
-            let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr, self.server.clone()).await?;
-            p2p_conn.connect_to_peer_server(peer_addr).await?;
-        } else {
+            //add pause to give other peer time to wait on notify handle
+            sleep(Duration::from_millis(1000)).await;
+            
+            //initiate hole punch routine with other peer
+            server_connection.init_punch(peer_id).await?;
+            
+            sleep(Duration::from_millis(250)).await;
+            
+            if let Ok(socket) = self.hole_punch(peer_addr).await {
+                let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+                let port = peer_id.port as u16;
+                let peer_addr = SocketAddr::from((ip_addr, port));
+
+                let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr, self.server.clone()).await?;
+                match p2p_conn.connect_to_peer_server(peer_addr).await {
+                    Ok(()) => {
+                        println!("REQUESTER: successful connection across NAT");
+                        conn_success = true
+                    },
+                    Err(_) => {
+                        println!("REQUESTER: connect across NAT failed");
+                        conn_success = false;
+                    }
+                }
+            } 
+        }
+            
+        
+        if !conn_success {
             // TURN for receiving here
-            let client_id = self.server.uid.clone()
-                .expect("server.uid must be set before calling TurnFallback::start");
+            let client_id = self.server.uid.clone();
 
             let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
 
             // TODO remove... just needed to have this to keep the program open long enough to receive data
-            tokio::time::sleep(Duration::from_millis(10000)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            
+            println!("REQUESTER: fallback to TURN succeeded");
         }
 
         Ok(())

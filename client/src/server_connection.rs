@@ -1,11 +1,11 @@
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, PeerId};
+use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FullId, PeerId};
 
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
     pub(crate) client: connector_client::ConnectorClient<Channel>,
     pub(crate) turn: turn_client::TurnClient<Channel>,
-    pub(crate) uid: Option<ClientId>,
+    pub(crate) uid: ClientId,
 }
 
 const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
@@ -21,44 +21,35 @@ impl ServerConnection {
         let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
             .connect().await?;
 
-        let client = connector_client::ConnectorClient::new(endpoint.clone());
+        let mut client = connector_client::ConnectorClient::new(endpoint.clone());
         let turn = turn_client::TurnClient::new(endpoint);
-
-        //todo use this to figure out id persistence across sessions
-        //1. get uuid
-        // let dirs = directories_next::ProjectDirs::from("org", "helpful_serf", "torrent_client")
-        //     .ok_or_else(|| Box::<dyn std::error::Error>::from("Could not get project dirs"))?;
-        // let path = dirs.data_local_dir();
-        // let uid_path = path.join("uuid.der");
-        // 
-        // let mut uid= "".to_string();
-        // 
-        // if uid_path.exists() {
-        //     uid = std::fs::read_to_string(&uid_path)?;
-        //     
-        //     //todo verify server has uid
-        // }
-        // //2. get new uid from server 
-        // else {
-        //     
-        // }
-        //update id information
-        // fs::create_dir_all(&path)?;
-        // fs::write(&uid_path, uid.clone())?;
+        
+        let uid = client.register_client(ClientRegistry { peer_id: None} ).await?;
+        let uid = uid.into_inner();
 
         Ok(
             ServerConnection {
                 client,
                 turn,
-                uid: None,
+                uid,
             }
         )
     }
 
-    pub async fn register_server_connection(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-        let uid = self.client.register_client(self_addr).await?;
-        self.uid = Some(uid.into_inner());
-
-        Ok(())
+    pub async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+        
+        let mut server_conn = self.client.clone();
+        
+        
+        match server_conn.update_registered_peer_id(
+            FullId { 
+                self_id: Option::from(self.uid.clone()), 
+                peer_id: Some(self_addr)
+            }
+        ).await {
+            Ok(res) => Ok(()),
+            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error>),
+        }
+        
     }
 }
