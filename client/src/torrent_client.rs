@@ -15,7 +15,8 @@ use local_ip_address::local_ip;
 use rcgen::Error;
 use tokio::time::{sleep, timeout};
 use crate::file_handler::{get_info_hashes, InfoHash};
-use crate::data_router::*;
+use crate::peer_connection::*;
+use crate::message::Message;
 
 #[derive(Debug)]
 pub struct TorrentClient {
@@ -24,8 +25,7 @@ pub struct TorrentClient {
     priv_socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
     info_hashes: Vec<InfoHash>,
-    data_handler: DataRouter,
-    data_handler_tx: mpsc::Sender<SocketData>,
+    peer_conns: Vec<PeerConnection>,
 }
 
 impl TorrentClient {
@@ -79,8 +79,6 @@ impl TorrentClient {
             Ok(file_hashes) => file_hashes,
             Err(err) => return Err(Box::new(err)),
         };
-
-        let (data_handler, data_handler_tx) = DataRouter::new();
         
         Ok(
             TorrentClient {
@@ -89,8 +87,7 @@ impl TorrentClient {
                 priv_socket: Some(priv_socket),
                 self_addr,
                 info_hashes,
-                data_handler,
-                data_handler_tx
+                peer_conns: Vec::new(),
             },
         )
     }
@@ -220,8 +217,9 @@ impl TorrentClient {
         let pub_port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
         let mut conn_success = false;
-        
 
+        // create a PeerConnection and get the receiver
+        let conn_tx = PeerConnection::new();
 
         println!("peer to send {:?}", peer_id);
 
@@ -234,7 +232,8 @@ impl TorrentClient {
                 socket, 
                 peer_id, 
                 self.server.clone(), 
-                Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string()
+                Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
+                conn_tx.clone()
             ).await?;
             // println!("P2P quic endpoint created successfully");
             let res = p2p_sender.quic_listener().await;
@@ -268,7 +267,8 @@ impl TorrentClient {
                             socket,
                             peer_id,
                             self.server.clone(),
-                            Ipv4Addr::from(self.self_addr.ipaddr).to_string()
+                            Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
+                            conn_tx.clone()
                         ).await?;
                         // println!("SEEDER: P2P quic endpoint across NAT created successfully");
                         match p2p_sender.quic_listener().await {
@@ -288,7 +288,6 @@ impl TorrentClient {
                     println!("SEEDER: Failed to receive hole punch trigger");
                 }
             }
-        
         }
             
         // Fall back connection on TURN
@@ -297,7 +296,7 @@ impl TorrentClient {
             // TURN for sending here
             let client_id = self.server.uid.clone();
 
-            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx).await?;
 
 
             // TODO probably develop a better way to do the actual send over TURN...
@@ -336,13 +335,15 @@ impl TorrentClient {
         server_connection.init_cert_sender(self.self_addr).await?;
         let mut conn_success = false;
 
+        let conn_tx = PeerConnection::new();
+
         if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
             let port = peer_id.priv_port as u16;
             let lan_peer_addr = SocketAddr::from((ip_addr, port));
             let priv_socket = self.priv_socket.take().unwrap();
 
-            let p2p_conn = QuicP2PConn::create_quic_client(priv_socket, self.self_addr, self.server.clone()).await?;
+            let p2p_conn = QuicP2PConn::create_quic_client(priv_socket, self.self_addr, self.server.clone(), conn_tx.clone()).await?;
             match p2p_conn.connect_to_peer_server(lan_peer_addr).await {
                 Ok(()) => {
                     println!("REQUESTER: successful connection within LAN");
@@ -373,7 +374,7 @@ impl TorrentClient {
                 let port = peer_id.port as u16;
                 let peer_addr = SocketAddr::from((ip_addr, port));
 
-                let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr, self.server.clone()).await?;
+                let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr, self.server.clone(), conn_tx.clone()).await?;
                 match p2p_conn.connect_to_peer_server(peer_addr).await {
                     Ok(()) => {
                         println!("REQUESTER: successful connection across NAT");
@@ -392,7 +393,7 @@ impl TorrentClient {
             // TURN for receiving here
             let client_id = self.server.uid.clone();
 
-            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, self.data_handler_tx.clone()).await?;
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx.clone()).await?;
 
             // TODO remove... just needed to have this to keep the program open long enough to receive data
             tokio::time::sleep(Duration::from_secs(5)).await;

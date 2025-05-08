@@ -1,6 +1,7 @@
 use crate::connection::connection::*;
 use crate::message::Message;
 use std::collections::HashMap;
+use tokio::sync::mpsc;
 
 /// PieceAssembler is the tool we will use to form pieces out of incoming packets (blocks)
 pub struct PieceAssembler {
@@ -15,7 +16,7 @@ pub struct PieceAssembler {
 
 impl PieceAssembler {
     /// function to instantiate a new PieceAssembler for a piece
-    fn new(piece_length: u32, block_size: u32) -> Self {
+    pub fn new(piece_length: u32, block_size: u32) -> Self {
         PieceAssembler {
             piece_length,
             block_size,
@@ -23,9 +24,17 @@ impl PieceAssembler {
         }
     }
 
-    // todo this might be a good idea, might not
-    /// function to add a block to the piece. returns Some<Vec<u8>> if complete piece, None if incomplete
-    fn add_block(/*todo params*/) -> Option<Vec<u8>> {
-        return None
+    // todo function to add block to piece
+    pub async fn assemble(
+        &mut self,
+        rx: &mut mpsc::Receiver<Message>,
+    ) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            if let Message::Block { block, .. } = msg {
+                buffer.extend(block);
+            }
+        }
+        buffer
     }
 }

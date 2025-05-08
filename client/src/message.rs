@@ -62,12 +62,11 @@ impl Message{
     }
     
     // Decodes the message
-    pub fn decode(buf: &[u8]) -> Option<Message> {
+    pub fn decode(buf: Vec<u8>) -> Option<Message> {
         if buf.len() < 4 {
             return None;
         }
-        
-        let mut cursor = Cursor::new(buf);
+
         let length = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
         
         let message_id = buf[4];

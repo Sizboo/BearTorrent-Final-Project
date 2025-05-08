@@ -7,13 +7,16 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::server_connection::ServerConnection;
 use crate::torrent_client::TorrentClient;
 use crate::connection::connection::{PeerId, CertMessage, Cert};
-use tokio::net::UdpSocket as TokioUdpSocket;
+use crate::message::Message;
+use tokio::{net::UdpSocket as TokioUdpSocket, sync::mpsc};
 use tokio::time::timeout;
 use tonic::Request;
 
 pub struct QuicP2PConn {
     endpoint: Endpoint,
     private_key: Option<Vec<u8>>,
+    /// the sender we use to send to a PeerConnection
+    conn_tx: mpsc::Sender<Message>,
 }
 
 impl QuicP2PConn {
@@ -41,7 +44,8 @@ impl QuicP2PConn {
         socket: TokioUdpSocket,
         peer_id: PeerId,
         server: ServerConnection,
-        cert_ip: String
+        cert_ip: String,
+        conn_tx: mpsc::Sender<Message>
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
 
         let (certs, key) = {
@@ -90,6 +94,7 @@ impl QuicP2PConn {
             QuicP2PConn {
                 endpoint,
                 private_key: Some(key),
+                conn_tx
             }
         )
     }
@@ -98,6 +103,7 @@ impl QuicP2PConn {
         socket: TokioUdpSocket,
         self_addr: PeerId,
         server: ServerConnection,
+        conn_tx: mpsc::Sender<Message>
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
         let mut server_connection = server.client.clone();
 
@@ -132,6 +138,7 @@ impl QuicP2PConn {
         Ok( QuicP2PConn {
             endpoint,
             private_key: None,
+            conn_tx
         })
     }
     
@@ -188,8 +195,10 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
+                let conn_for_read = conn.clone();
+                let tx_for_read   = self.conn_tx.clone();
                 let read_task = tokio::spawn(async move {
-                    let res = QuicP2PConn::recv_data(conn).await;
+                    let res = QuicP2PConn::recv_data(conn_for_read, tx_for_read).await;
                     if res.is_err() {
                         eprintln!("QuicP2PConn::recv_data failed {:?}", res);
                     }
@@ -206,13 +215,13 @@ impl QuicP2PConn {
         
     }
     
-    async fn recv_data(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+    async fn recv_data(conn: Connection, conn_tx: mpsc::Sender<Message>) -> Result<(), Box<dyn std::error::Error>> {
 
         let mut recv = conn.accept_uni().await?;
         let mut buf = vec![0u8; 1024];
         let n = recv.read(&mut buf).await?.unwrap();
 
-        println!("Received {:?}", String::from_utf8_lossy(&buf[..n])); 
+        conn_tx.send(buf);
         
         conn.closed().await;
         println!("receiving end quic connection closed");
