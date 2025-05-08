@@ -38,7 +38,7 @@ impl TurnFallback {
 
                 // send received data off to our connection
                 // todo make sure this works
-                conn_tx.send(pkt.payload).await;
+                // conn_tx.send(pkt.payload).await;
             }
         });
 

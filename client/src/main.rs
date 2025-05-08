@@ -49,9 +49,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let file_hash = 1234;
 
-            let mut peer_list = torrent_client.file_request(server_conn.uid, file_hash).await?;
+            // let mut peer_list = torrent_client.file_request(server_conn.uid, file_hash).await?;
 
-            torrent_client.get_file_from_peer(peer_list.list.pop().unwrap()).await?;
+            // torrent_client.get_file_from_peer(peer_list.list.pop().unwrap()).await?;
         }
         _ => {
             println!("Unknown command: {}", command);
