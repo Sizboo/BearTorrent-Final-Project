@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions};
 use sha1::{Sha1, Digest};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::iter::Map;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -253,8 +255,8 @@ pub(crate) fn read_piece_from_file(info_hash: InfoHash, piece_index: u64) -> std
 // This function goes through the client's resource directory
 // to generate info hashes for each file
 // Returns: Vec<InfoHash>
-pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
-    let mut results: Vec<InfoHash> = Vec::new();
+pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], InfoHash>> {
+    let mut results: HashMap<[u8;20],InfoHash> = HashMap::new();
 
     // Verify resources are set up, fetch downloaded files PathBuf
     verify_client_dir_setup();
@@ -267,7 +269,8 @@ pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
 
         // If the entry is a file, create InfoHash and append
         if path.is_file() {
-            results.push(InfoHash::new(file)?)
+            let temp_infohash = InfoHash::new(file)?;
+            results.insert(temp_infohash.get_hashed_info_hash(), temp_infohash);
         }
     }
     
