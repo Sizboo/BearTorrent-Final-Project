@@ -173,7 +173,7 @@ impl QuicP2PConn {
     }
     
     async fn send_data(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
-        let mut sender = conn.open_uni().await?;
+        let mut sender = conn.open_bi().await?;
 
         sender.write_all(b"sending data directly to my peer!").await?;
         sender.finish()?;

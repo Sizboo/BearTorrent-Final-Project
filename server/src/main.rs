@@ -6,7 +6,7 @@ use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, Co
 use tokio::sync::{Mutex, mpsc, Notify};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FullId };
+use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FullId, InfoHash};
 use crate::connection::turn_server::TurnServer;
 use crate::turn::TurnService;
 
@@ -25,7 +25,7 @@ struct Seeder {
 #[derive(Debug, Default)]
 pub struct ConnectionService {
     client_registry: Arc<RwLock<HashMap<ClientId, Option<PeerId>>>>,
-    file_tracker: Arc<Mutex<HashMap<u32, Vec<Seeder>>>>,
+    file_tracker: Arc<Mutex<HashMap<InfoHash, Vec<Seeder>>>>,
     send_tracker: Arc<Mutex<HashMap<ClientId, mpsc::Receiver<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
     //todo refactor this to use a send channel
@@ -50,7 +50,9 @@ impl Connector for ConnectionService {
         let mut file_tracker = self.file_tracker.lock().await;
 
         // notify all seeders of the file
-        if let Some(seeders) = file_tracker.get_mut(&r.info_hash) {
+        let info_hash = r.info_hash.ok_or(Status::invalid_argument("info_hash missing"))?;
+        
+        if let Some(seeders) = file_tracker.get_mut(&info_hash) {
             for seeder in seeders.iter_mut() {
                 
                 let res = seeder.notify.send(requester.clone()).await;
@@ -137,8 +139,7 @@ impl Connector for ConnectionService {
         request: Request<FileMessage>,
     ) -> Result<Response<ClientId>, Status> {
         let r = request.into_inner();
-
-        println!("advertising file: {:}", r.info_hash);
+        println!("advertising file: {:?}", r.info_hash);
 
         let client_id = match r.id {
             Some(id) => id,
@@ -147,19 +148,18 @@ impl Connector for ConnectionService {
 
         let (tx, rx) = mpsc::channel(1);
 
-        let mut file_tracker = self.file_tracker.lock().await;
-        file_tracker.entry(r.info_hash).or_default().push(Seeder {
-            client_id: client_id.clone(),
-            notify: tx,
-        });
+        
+        if let Some(info_hash) = r.info_hash {
+            let mut file_tracker = self.file_tracker.lock().await;
+            file_tracker.entry(info_hash).or_default().push(Seeder {
+                client_id: client_id.clone(),
+                notify: tx,
+            });
+        } else {
+            Err(Status::invalid_argument("info_hash missing"))?
+        }
         
        
-        // let peer_id = self.client_registry.read().await.get(&client_id).cloned()
-        //     .ok_or(Status::invalid_argument("failed to get peer id in advertise"))?;
-        
-        //todo fix this 
-        // self.init_hole_punch.write().await.insert(peer_id, tx);
-        
         let mut send_tracker = self.send_tracker.lock().await;
         send_tracker.insert(client_id.clone(), rx);
 

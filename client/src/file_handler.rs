@@ -2,6 +2,7 @@ use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions};
 use sha1::{Sha1, Digest};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use crate::connection::*;
 
 #[derive(Debug)]
 pub struct InfoHash{
@@ -109,6 +110,20 @@ impl InfoHash {
         let result = hasher.finalize();
         let bytes: [u8; 20] = result.try_into().unwrap();
         bytes
+    }
+    
+    pub fn get_server_info_hash(&self) ->  connection::InfoHash {
+        
+        let pieces = self.pieces.iter().map(|x| connection::PieceHash{
+            hash: Vec::from(x)
+        }).collect::<Vec<_>>();
+        
+        connection::InfoHash {
+            name: self.name.clone(),
+            file_length: self.file_length.clone(),
+            piece_length: self.piece_length.clone(),
+            pieces,
+        }
     }
 }
 

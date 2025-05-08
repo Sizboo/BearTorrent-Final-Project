@@ -9,11 +9,12 @@ use tonic::{Request, Response};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::turn_fallback::TurnFallback;
 use crate::server_connection::ServerConnection;
-use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId};
+use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId, InfoHash as ConnHash};
 use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
 use rcgen::Error;
 use tokio::time::{sleep, timeout};
+use crate::file_handler;
 use crate::file_handler::{get_info_hashes, InfoHash};
 use crate::peer_connection::*;
 use crate::message::Message;
@@ -172,7 +173,6 @@ impl TorrentClient {
     }
 
    
-
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
     pub async fn seeding(server: &mut ServerConnection) -> Result<(), Box<dyn std::error::Error>> {
@@ -182,16 +182,11 @@ impl TorrentClient {
 
             let mut server_client = torrent_client.server.client.clone();
 
-            //todo REMOVE THIS and add proper ERROR CHECKING for REAL USE
-            let _ = server_client.advertise(FileMessage {
-                id: Option::from(torrent_client.server.uid.clone()),
-                info_hash: 1234,
-            }).await;
+            //update server's list of seeder files
+            torrent_client.advertise_all().await?;            
 
             // calls get_peer
-            //todo remove unwarp error checking IS IMPORTANT HERE
             let uid = torrent_client.server.uid.clone();
-            println!("My Client ID: {:?}", uid);
             let response = server_client.seed(uid).await;
 
             // waits for response from get_peer
@@ -313,13 +308,13 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&self, client_id: ClientId , file_hash: u32) -> Result<PeerList, Box<dyn std::error::Error>> {
+    pub async fn file_request(&self, client_id: ClientId , file_hash: ConnHash) -> Result<PeerList, Box<dyn std::error::Error>> {
         let mut client = self.server.client.clone();
         
         
         let request = Request::new(FileMessage {
             id: Some(client_id),
-            info_hash: file_hash,
+            info_hash: Some(file_hash),
         });
         
         let resp = client.send_file_request(request).await?;
@@ -422,17 +417,27 @@ impl TorrentClient {
         Ok(())
     }
     
-    pub async fn advertise(&self, client_id: ClientId) -> Result<ClientId, Box<dyn std::error::Error>> {
+    pub async fn advertise(&self, info_hash: ConnHash) -> Result<ClientId, Box<dyn std::error::Error>> {
         let mut client = self.server.client.clone();
         
         //todo make hash active
         let request = Request::new(FileMessage {
-            id: Some(client_id),
-            info_hash: 12345,
+            id: Some(self.server.uid.clone()),
+            info_hash: Some(info_hash),
         });
         
         let resp = client.advertise(request).await?;
         
         Ok(resp.into_inner())
+    }
+    
+    async fn advertise_all(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let my_hashes = get_info_hashes()?;
+
+        for hash in my_hashes {
+           self.advertise(hash.get_server_info_hash()).await?; 
+        } 
+        
+        Ok(())
     }
 }
