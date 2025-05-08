@@ -216,14 +216,14 @@ impl TorrentClient {
         if self.self_addr.ipaddr == peer_id.ipaddr {
             //start quick server
             let socket = self.priv_socket.take().unwrap();
-            let p2p_sender = QuicP2PConn::create_quic_server(
-                self, 
+            let mut p2p_sender = QuicP2PConn::create_quic_server(
                 socket, 
                 peer_id, 
                 self.server.clone(), 
                 Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
                 conn_tx.clone(),
                 &mut conn_rx,
+                &mut self.server.file_hashes,
             ).await?;
             // println!("P2P quic endpoint created successfully");
             let res = p2p_sender.quic_listener().await;
@@ -252,14 +252,16 @@ impl TorrentClient {
                     if let Ok(socket) = self.hole_punch(peer_addr).await {
                         // println!("Returned value {:?}", socket);
                         //start quick server
-                        let p2p_sender = QuicP2PConn::create_quic_server(
-                            self,
+                        
+                        
+                        let mut p2p_sender = QuicP2PConn::create_quic_server(
                             socket,
                             peer_id,
                             self.server.clone(),
                             Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
                             conn_tx.clone(),
                             &mut conn_rx,
+                            &mut self.server.file_hashes,
                         ).await?;
                         // println!("SEEDER: P2P quic endpoint across NAT created successfully");
                         match p2p_sender.quic_listener().await {
@@ -283,19 +285,19 @@ impl TorrentClient {
         {
       
             // TURN for sending here
-            let client_id = self.server.uid.clone();
-
-            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx).await?;
-
-
-            // TODO probably develop a better way to do the actual send over TURN...
-            let response = self.server.client.get_client_id(peer_id).await?;
-            let target = response.into_inner();
-            let buf = "data sent over TURN".as_bytes().to_vec();
-
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-            fallback.send_to(target, buf).await?;
-            println!("SEEDER fallback to TURN")
+            // let client_id = self.server.uid.clone();
+            // 
+            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx).await?;
+            // 
+            // 
+            // // TODO probably develop a better way to do the actual send over TURN...
+            // let response = self.server.client.get_client_id(peer_id).await?;
+            // let target = response.into_inner();
+            // let buf = "data sent over TURN".as_bytes().to_vec();
+            // 
+            // tokio::time::sleep(Duration::from_millis(1000)).await;
+            // fallback.send_to(target, buf).await?;
+            // println!("SEEDER fallback to TURN")
         }
 
         Ok(())
@@ -331,12 +333,13 @@ impl TorrentClient {
             let lan_peer_addr = SocketAddr::from((ip_addr, port));
             let priv_socket = self.priv_socket.take().unwrap();
 
-            let p2p_conn = QuicP2PConn::create_quic_client(
+            let mut p2p_conn = QuicP2PConn::create_quic_client(
                 priv_socket,
                 self.self_addr,
                 self.server.clone(),
                 conn_tx.clone(),
                 &mut conn_rx,
+                &mut self.server.file_hashes,
             ).await?;
             match p2p_conn.connect_to_peer_server(lan_peer_addr).await {
                 Ok(()) => {
@@ -367,12 +370,13 @@ impl TorrentClient {
                 let port = peer_id.port as u16;
                 let peer_addr = SocketAddr::from((ip_addr, port));
 
-                let p2p_conn = QuicP2PConn::create_quic_client(
+                let mut p2p_conn = QuicP2PConn::create_quic_client(
                     socket,
                     self.self_addr,
                     self.server.clone(),
                     conn_tx.clone(),
                     &mut conn_rx,
+                    &mut self.server.file_hashes,
                 ).await?;
                 
                 match p2p_conn.connect_to_peer_server(peer_addr).await {
@@ -390,14 +394,14 @@ impl TorrentClient {
         
         {
             // TURN for receiving here
-            let client_id = self.server.uid.clone();
-
-            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx.clone()).await?;
-
-            // TODO remove... just needed to have this to keep the program open long enough to receive data
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            
-            println!("REQUESTER: fallback to TURN succeeded");
+            // let client_id = self.server.uid.clone();
+            // 
+            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx.clone()).await?;
+            // 
+            // // TODO remove... just needed to have this to keep the program open long enough to receive data
+            // tokio::time::sleep(Duration::from_secs(5)).await;
+            // 
+            // println!("REQUESTER: fallback to TURN succeeded");
         }
 
         Ok(())

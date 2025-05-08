@@ -1,3 +1,5 @@
+use std::any::Any;
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
@@ -14,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 use tokio::time::timeout;
 use tonic::Request;
-use crate::file_handler::read_piece_from_file;
+use crate::file_handler::{read_piece_from_file, InfoHash};
 
 pub struct QuicP2PConn<'a> {
     endpoint: Endpoint,
@@ -22,6 +24,7 @@ pub struct QuicP2PConn<'a> {
     /// the sender we use to send to a PeerConnection
     conn_tx: mpsc::Sender<Vec<u8>>,
     conn_rx: &'a mut mpsc::Receiver<Message>,
+    file_map: &'a HashMap<[u8; 20], InfoHash>,
 }
 
 impl<'a> QuicP2PConn<'a> {
@@ -45,13 +48,13 @@ impl<'a> QuicP2PConn<'a> {
     }
 
     pub(crate) async fn create_quic_server(
-        torrent_client: &mut TorrentClient,
         socket: TokioUdpSocket,
         peer_id: PeerId,
         server: ServerConnection,
         cert_ip: String,
         conn_tx: mpsc::Sender<Vec<u8>>,
         conn_rx: &'a mut mpsc::Receiver<Message>,
+        file_map: &'a HashMap<[u8; 20], InfoHash>,
     ) -> Result<QuicP2PConn<'a>, Box<dyn std::error::Error>> {
 
         let (certs, key) = {
@@ -101,7 +104,8 @@ impl<'a> QuicP2PConn<'a> {
                 endpoint,
                 private_key: Some(key),
                 conn_tx,
-                conn_rx
+                conn_rx,
+                file_map
             }
         )
     }
@@ -112,6 +116,7 @@ impl<'a> QuicP2PConn<'a> {
         server: ServerConnection,
         conn_tx: mpsc::Sender<Vec<u8>>,
         conn_rx: &'a mut  mpsc::Receiver<Message>,
+        file_map: &'a HashMap<[u8; 20], InfoHash>,
     ) -> Result<QuicP2PConn<'a>, Box<dyn std::error::Error>> {
         let mut server_connection = server.client.clone();
 
@@ -148,6 +153,7 @@ impl<'a> QuicP2PConn<'a> {
             private_key: None,
             conn_tx,
             conn_rx,
+            file_map
         })
     }
     
@@ -182,10 +188,23 @@ impl<'a> QuicP2PConn<'a> {
         let req = recv.read_to_end(64 * 1024).await?;
         println!("Client received req {:?}", req);
        
+        let mut request = None;
+        if let Some(msg) = Message::decode(req) {
+            request = match msg {
+                Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
+                _ => None, 
+            };
+        }
+        let (index, begin, length, hash)= request.ok_or("failed to decode request")?;
+        
+        let info_hash = self.file_map.get(&hash).cloned().ok_or("seeder missing file info")?; 
+
+
+        let piece = read_piece_from_file(info_hash, index as u64)?;
         
         
-        let piece = read_piece_from_file()
-        
+        send.write_all(&piece).await?;
+        println!("Seeder sent piece {:?}", piece);
         
         conn.closed().await;
         println!("sending end quic connection closed");

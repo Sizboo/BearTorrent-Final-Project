@@ -8,7 +8,7 @@ pub struct ServerConnection {
     pub(crate) client: connector_client::ConnectorClient<Channel>,
     pub(crate) turn: turn_client::TurnClient<Channel>,
     pub(crate) uid: ClientId,
-    pub(crate) file_hashes: HashMap<Vec<u8>, InfoHash>
+    pub(crate) file_hashes: HashMap<[u8;20], InfoHash>
 }
 
 const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
