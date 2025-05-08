@@ -115,7 +115,7 @@ impl InfoHash {
 // Checks if a file exists, if it doesn't then it is created.
 // Returns the PathBuf to this file
 fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::Result<(PathBuf, bool)> {
-    let temp_file_name = format!("resources/{}/{}.{}", src, file_name, extension);
+    let temp_file_name = format!("resources/{}/{}{}", src, file_name, extension);
     let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
         Ok(true) => (PathBuf::from(temp_file_name), true),
         Ok(false) => {
@@ -129,13 +129,18 @@ fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::
 
 // Get the .part of the specified file
 fn get_part_file(file_name: String) -> PathBuf {
-    let (path, is_new) = get_temp_file(file_name, "part".to_string(), "cache".to_string()).unwrap();
+    let (path, is_new) = get_temp_file(file_name, ".part".to_string(), "cache".to_string()).unwrap();
     path
 }
 
 fn get_info_file(file_name: String) -> (PathBuf, bool) {
-    let (path, is_new) = get_temp_file(file_name, "info".to_string(), "cache".to_string()).unwrap();
+    let (path, is_new) = get_temp_file(file_name, ".info".to_string(), "cache".to_string()).unwrap();
     (path, is_new)
+}
+
+fn get_file(file_name: String) -> PathBuf {
+    let (path, is_new) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
+    path
 }
 
 // Create the files directory if it doesn't exist
@@ -234,6 +239,17 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 
 }
 
+pub(crate) fn read_piece_from_file(info_hash: InfoHash, piece_index: u64) -> std::io::Result<Vec<u8>>{
+    let file_path = get_file(info_hash.name.clone());
+    let mut file = OpenOptions::new().read(true).open(&file_path)?;
+    let num_pieces = info_hash.piece_length as usize;
+    let mut buf= vec![0u8;num_pieces];
+    
+    file.seek(SeekFrom::Start(info_hash.piece_length * piece_index))?;
+    file.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
 // This function goes through the client's resource directory
 // to generate info hashes for each file
 // Returns: Vec<InfoHash>
@@ -254,7 +270,7 @@ pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
             results.push(InfoHash::new(file)?)
         }
     }
-
+    
     // Return the list of hashes
     Ok(results)
 
