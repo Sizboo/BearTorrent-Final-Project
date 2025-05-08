@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::fs::File;
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
 use stunclient::StunClient;
@@ -214,7 +215,7 @@ impl TorrentClient {
         let mut conn_success = false;
 
         // create a PeerConnection and get the receiver
-        let conn_tx = PeerConnection::new();
+        let (conn_tx, conn_rx) = FileAssembler::new();
 
         println!("peer to send {:?}", peer_id);
 
@@ -228,14 +229,16 @@ impl TorrentClient {
                 peer_id, 
                 self.server.clone(), 
                 Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
-                conn_tx.clone()
+                conn_tx.clone(),
+                conn_rx,
             ).await?;
             // println!("P2P quic endpoint created successfully");
             let res = p2p_sender.quic_listener().await;
             match res {
                 Ok(()) => {
                     println!("SEEDER: Quic connection within LAN success!");
-                    conn_success = true
+                    // conn_success = true
+                    return Ok(());
                 },
                 Err(e) => {
                     println!("SEEDER: LAN based quic connection failed");
@@ -263,7 +266,8 @@ impl TorrentClient {
                             peer_id,
                             self.server.clone(),
                             Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
-                            conn_tx.clone()
+                            conn_tx.clone(),
+                            conn_rx
                         ).await?;
                         // println!("SEEDER: P2P quic endpoint across NAT created successfully");
                         match p2p_sender.quic_listener().await {

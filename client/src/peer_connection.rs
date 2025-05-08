@@ -6,27 +6,33 @@ use tokio::sync::mpsc;
 
 /// this represents a connection between 2 peers
 #[derive(Debug)]
-pub struct PeerConnection {
+pub struct FileAssembler {
     /// the sender we will use to send to a PieceAssembler
-    snd_tx: mpsc::Sender<Message>,
+    // snd_tx: mpsc::Sender<Message>,
     /// the receiver we will let a PieceAssembler borrow so we can send to it
-    snd_rx: mpsc::Receiver<Message>,
+    // snd_rx: mpsc::Receiver<Message>,
     /// the receiver we will get data from via LAN/P2P/QUIC
-    rcv_rx: mpsc::Receiver<Message>,
+    rcv_rx: mpsc::Receiver<Vec<u8>>, //potentially just receive raw bytes from pieceA
+   
+    /// sender used to send file requests across a connection
+    request_tx: mpsc::Sender<Vec<u8>>,
 }
 
-impl PeerConnection {
-    pub fn new() -> (mpsc::Sender<Message>) {
-        let (snd_tx, snd_rx) = mpsc::channel::<Message>(10); // PieceAssembler sender/receiver
-        let (rcv_tx, rcv_rx) = mpsc::channel::<Message>(10); // 'connection' sender/receiver
+impl FileAssembler {
+    pub fn new() -> (mpsc::Sender<Vec<u8>>, mpsc::Receiver<Vec<u8>>) {
+        // let (snd_tx, snd_rx) = mpsc::channel::<Message>(10); // PieceAssembler sender/receiver
+        let (rcv_tx, rcv_rx) = mpsc::channel::<Vec<u8>>(10); // 'connection' sender/receiver
+        let (request_tx, request_rx) = mpsc::channel::<Vec<u8>>(10); 
 
-        let mut conn = PeerConnection { snd_tx, snd_rx, rcv_rx };
+        let mut conn = FileAssembler { rcv_rx, request_tx };
+        
+        
 
         tokio::spawn(async move {
             conn.receive_loop().await;
         });
 
-        rcv_tx
+        (rcv_tx, request_rx)
     }
 
     async fn receive_loop(&mut self) {

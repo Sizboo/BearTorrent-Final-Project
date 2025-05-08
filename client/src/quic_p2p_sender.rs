@@ -16,7 +16,8 @@ pub struct QuicP2PConn {
     endpoint: Endpoint,
     private_key: Option<Vec<u8>>,
     /// the sender we use to send to a PeerConnection
-    conn_tx: mpsc::Sender<Message>,
+    conn_tx: mpsc::Sender<Vec<u8>>,
+    conn_rx: mpsc::Receiver<Vec<u8>>,
 }
 
 impl QuicP2PConn {
@@ -45,7 +46,8 @@ impl QuicP2PConn {
         peer_id: PeerId,
         server: ServerConnection,
         cert_ip: String,
-        conn_tx: mpsc::Sender<Message>
+        conn_tx: mpsc::Sender<Vec<u8>>,
+        conn_rx: mpsc::Receiver<Vec<u8>>,
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
 
         let (certs, key) = {
