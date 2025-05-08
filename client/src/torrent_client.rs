@@ -26,8 +26,7 @@ pub struct TorrentClient {
     pub_socket: Option<UdpSocket>,
     priv_socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
-    info_hashes: Vec<InfoHash>,
-    peer_conns: Vec<PeerConnection>,
+    // peer_conns: Vec<PeerConnection>,
 }
 
 impl TorrentClient {
@@ -77,10 +76,7 @@ impl TorrentClient {
         
         let server = server.clone();
         
-        let info_hashes = match get_info_hashes(){
-            Ok(file_hashes) => file_hashes,
-            Err(err) => return Err(Box::new(err)),
-        };
+        
         
         Ok(
             TorrentClient {
@@ -88,8 +84,6 @@ impl TorrentClient {
                 pub_socket: Some(UdpSocket::try_from(socket)?) ,
                 priv_socket: Some(priv_socket),
                 self_addr,
-                info_hashes,
-                peer_conns: Vec::new(),
             },
         )
     }
@@ -212,10 +206,9 @@ impl TorrentClient {
         let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let pub_port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
-        let mut conn_success = false;
 
         // create a PeerConnection and get the receiver
-        let (conn_tx, conn_rx) = FileAssembler::new();
+        let (conn_tx, mut conn_rx) = FileAssembler::new();
 
         println!("peer to send {:?}", peer_id);
 
@@ -230,7 +223,7 @@ impl TorrentClient {
                 self.server.clone(), 
                 Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
                 conn_tx.clone(),
-                conn_rx,
+                &mut conn_rx,
             ).await?;
             // println!("P2P quic endpoint created successfully");
             let res = p2p_sender.quic_listener().await;
@@ -242,13 +235,12 @@ impl TorrentClient {
                 },
                 Err(e) => {
                     println!("SEEDER: LAN based quic connection failed");
-                    conn_success = false;
                 }
             }
         }
         
         //2. try connection across NAT
-        if !conn_success {
+        {
             let timeout_duration = Duration::from_secs(4);
             let res = timeout(
                 timeout_duration, 
@@ -267,30 +259,28 @@ impl TorrentClient {
                             self.server.clone(),
                             Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
                             conn_tx.clone(),
-                            conn_rx
+                            &mut conn_rx,
                         ).await?;
                         // println!("SEEDER: P2P quic endpoint across NAT created successfully");
                         match p2p_sender.quic_listener().await {
                             Ok(()) => {
                                 println!("SEEDER: Quic connection across NAT successful!");
-                                conn_success = true
+                                return Ok(())
                             },
                             Err(e) => {
                                 println!("SEEDER: Connection across NAT after hole punch failed");
-                                conn_success = false;
                             }
                         }
                     } 
                 },
                 Err(e) => {
-                    conn_success = false;
                     println!("SEEDER: Failed to receive hole punch trigger");
                 }
             }
         }
             
         // Fall back connection on TURN
-        if !conn_success {
+        {
       
             // TURN for sending here
             let client_id = self.server.uid.clone();
@@ -332,9 +322,8 @@ impl TorrentClient {
         //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
-        let mut conn_success = false;
 
-        let conn_tx = PeerConnection::new();
+        let (conn_tx, mut conn_rx) = FileAssembler::new();
 
         if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
@@ -342,20 +331,25 @@ impl TorrentClient {
             let lan_peer_addr = SocketAddr::from((ip_addr, port));
             let priv_socket = self.priv_socket.take().unwrap();
 
-            let p2p_conn = QuicP2PConn::create_quic_client(priv_socket, self.self_addr, self.server.clone(), conn_tx.clone()).await?;
+            let p2p_conn = QuicP2PConn::create_quic_client(
+                priv_socket,
+                self.self_addr,
+                self.server.clone(),
+                conn_tx.clone(),
+                &mut conn_rx,
+            ).await?;
             match p2p_conn.connect_to_peer_server(lan_peer_addr).await {
                 Ok(()) => {
                     println!("REQUESTER: successful connection within LAN");
-                    conn_success = true
+                    return Ok(())
                 },
                 Err(_) => {
                     println!("REQUESTER: connect over LAN failed");
-                    conn_success = false;
                 }
             }
         }
 
-        if !conn_success {
+        {    
             let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
             let port = peer_id.port as u16;
             let peer_addr = SocketAddr::from((ip_addr, port));
@@ -373,22 +367,28 @@ impl TorrentClient {
                 let port = peer_id.port as u16;
                 let peer_addr = SocketAddr::from((ip_addr, port));
 
-                let p2p_conn = QuicP2PConn::create_quic_client(socket, self.self_addr, self.server.clone(), conn_tx.clone()).await?;
+                let p2p_conn = QuicP2PConn::create_quic_client(
+                    socket,
+                    self.self_addr,
+                    self.server.clone(),
+                    conn_tx.clone(),
+                    &mut conn_rx,
+                ).await?;
+                
                 match p2p_conn.connect_to_peer_server(peer_addr).await {
                     Ok(()) => {
                         println!("REQUESTER: successful connection across NAT");
-                        conn_success = true
+                        return Ok(())
                     },
                     Err(_) => {
                         println!("REQUESTER: connect across NAT failed");
-                        conn_success = false;
                     }
                 }
             } 
         }
             
         
-        if !conn_success {
+        {
             // TURN for receiving here
             let client_id = self.server.uid.clone();
 
@@ -436,7 +436,7 @@ impl TorrentClient {
     }
     
     async fn advertise_all(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let my_hashes = get_info_hashes()?;
+        let my_hashes = self.server.file_hashes.clone().into_values();
 
         for hash in my_hashes {
            self.advertise(hash.get_server_info_hash()).await?; 

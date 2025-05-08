@@ -1,11 +1,14 @@
+use std::collections::HashMap;
 use tonic::transport::{Channel, ClientTlsConfig};
 use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FullId, PeerId};
+use crate::file_handler::{get_info_hashes, InfoHash};
 
 #[derive(Debug, Clone)]
 pub struct ServerConnection {
     pub(crate) client: connector_client::ConnectorClient<Channel>,
     pub(crate) turn: turn_client::TurnClient<Channel>,
     pub(crate) uid: ClientId,
+    pub(crate) file_hashes: HashMap<Vec<u8>, InfoHash>
 }
 
 const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
@@ -27,11 +30,17 @@ impl ServerConnection {
         let uid = client.register_client(ClientRegistry { peer_id: None} ).await?;
         let uid = uid.into_inner();
 
+        let file_hashes = match get_info_hashes(){
+            Ok(file_hashes) => file_hashes,
+            Err(err) => return Err(Box::new(err)),
+        };
+
         Ok(
             ServerConnection {
                 client,
                 turn,
                 uid,
+                file_hashes,
             }
         )
     }

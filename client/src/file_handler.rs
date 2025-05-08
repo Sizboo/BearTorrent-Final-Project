@@ -4,7 +4,7 @@ use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use crate::connection::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InfoHash{
     name: String, // Name of the file
     file_length: u64, // Size of the file in bytes
@@ -111,13 +111,13 @@ impl InfoHash {
         let bytes: [u8; 20] = result.try_into().unwrap();
         bytes
     }
-    
+
     pub fn get_server_info_hash(&self) ->  connection::InfoHash {
-        
+
         let pieces = self.pieces.iter().map(|x| connection::PieceHash{
             hash: Vec::from(x)
         }).collect::<Vec<_>>();
-        
+
         connection::InfoHash {
             name: self.name.clone(),
             file_length: self.file_length.clone(),

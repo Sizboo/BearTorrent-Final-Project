@@ -1,5 +1,6 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
 use std::time::Duration;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Connection, Endpoint, TokioRuntime};
@@ -9,18 +10,21 @@ use crate::torrent_client::TorrentClient;
 use crate::connection::connection::{PeerId, CertMessage, Cert};
 use crate::message::Message;
 use tokio::{net::UdpSocket as TokioUdpSocket, sync::mpsc};
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc::Sender;
 use tokio::time::timeout;
 use tonic::Request;
+use crate::file_handler::read_piece_from_file;
 
-pub struct QuicP2PConn {
+pub struct QuicP2PConn<'a> {
     endpoint: Endpoint,
     private_key: Option<Vec<u8>>,
     /// the sender we use to send to a PeerConnection
     conn_tx: mpsc::Sender<Vec<u8>>,
-    conn_rx: mpsc::Receiver<Vec<u8>>,
+    conn_rx: &'a mut mpsc::Receiver<Message>,
 }
 
-impl QuicP2PConn {
+impl<'a> QuicP2PConn<'a> {
 
     /// init_for_certificate enables a quic client to receive the server's self-signed certificate
     /// this must be called before a client can retrieve a certificate and make a quic connection
@@ -47,8 +51,8 @@ impl QuicP2PConn {
         server: ServerConnection,
         cert_ip: String,
         conn_tx: mpsc::Sender<Vec<u8>>,
-        conn_rx: mpsc::Receiver<Vec<u8>>,
-    ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
+        conn_rx: &'a mut mpsc::Receiver<Message>,
+    ) -> Result<QuicP2PConn<'a>, Box<dyn std::error::Error>> {
 
         let (certs, key) = {
             println!("generating self-signed certificate");
@@ -96,7 +100,8 @@ impl QuicP2PConn {
             QuicP2PConn {
                 endpoint,
                 private_key: Some(key),
-                conn_tx
+                conn_tx,
+                conn_rx
             }
         )
     }
@@ -105,8 +110,9 @@ impl QuicP2PConn {
         socket: TokioUdpSocket,
         self_addr: PeerId,
         server: ServerConnection,
-        conn_tx: mpsc::Sender<Message>
-    ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
+        conn_tx: mpsc::Sender<Vec<u8>>,
+        conn_rx: &'a mut  mpsc::Receiver<Message>,
+    ) -> Result<QuicP2PConn<'a>, Box<dyn std::error::Error>> {
         let mut server_connection = server.client.clone();
 
         let request = Request::new(self_addr);
@@ -140,12 +146,13 @@ impl QuicP2PConn {
         Ok( QuicP2PConn {
             endpoint,
             private_key: None,
-            conn_tx
+            conn_tx,
+            conn_rx,
         })
     }
     
     //todo quic_listener will have to take channel_rx and pass to send_data to send data from connection to our implementation
-    pub(crate) async fn quic_listener(&self)
+    pub(crate) async fn quic_listener(&mut self)
     -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
         
@@ -157,15 +164,9 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-                let send_task = tokio::spawn(async move {
-                    let res = QuicP2PConn::send_data(conn).await;
-                    if res.is_err() {
-                        eprintln!("QuicP2PConn::send_data failed {:?}", res);
-                    }
-                });
-
-                println!("Connection received on {:?}", self.endpoint.local_addr());
-                send_task.await?;
+                
+                self.send_data(conn).await?;
+                
                 Ok(())
             },
             Err(e) => {
@@ -174,11 +175,17 @@ impl QuicP2PConn {
         }
     }
     
-    async fn send_data(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
-        let mut sender = conn.open_bi().await?;
-
-        sender.write_all(b"sending data directly to my peer!").await?;
-        sender.finish()?;
+    async fn send_data(&mut self, conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+        let (mut send, mut recv) = conn.accept_bi().await?;
+        
+        
+        let req = recv.read_to_end(64 * 1024).await?;
+        println!("Client received req {:?}", req);
+       
+        
+        
+        let piece = read_piece_from_file()
+        
         
         conn.closed().await;
         println!("sending end quic connection closed");
@@ -187,8 +194,8 @@ impl QuicP2PConn {
         
     }
 
-    pub(crate) async fn connect_to_peer_server(&self, peer_addr: SocketAddr)
-    -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn connect_to_peer_server(&mut self, peer_addr: SocketAddr)
+                                               -> Result<(), Box<dyn std::error::Error>> {
 
         // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
         let timeout_duration = Duration::from_secs(4);
@@ -197,16 +204,8 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-                let conn_for_read = conn.clone();
-                let tx_for_read   = self.conn_tx.clone();
-                let read_task = tokio::spawn(async move {
-                    let res = QuicP2PConn::recv_data(conn_for_read, tx_for_read).await;
-                    if res.is_err() {
-                        eprintln!("QuicP2PConn::recv_data failed {:?}", res);
-                    }
-                });
+                self.recv_data(conn).await?;
 
-                read_task.await?;
                 Ok(()) 
             }
             Err(e) => {
@@ -217,13 +216,26 @@ impl QuicP2PConn {
         
     }
     
-    async fn recv_data(conn: Connection, conn_tx: mpsc::Sender<Message>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn recv_data(&mut self, conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
 
-        let mut recv = conn.accept_uni().await?;
-        let mut buf = vec![0u8; 1024];
-        let n = recv.read(&mut buf).await?.unwrap();
+        let (mut send, mut recv) = conn.open_bi().await?;
+        
+        if let Some(msg) = self.conn_rx.recv().await {
+            
+            println!("Send message to peer");
+            send.write_all(&msg.encode()).await?;
 
-        conn_tx.send(buf);
+            let length: Result<u32, Box<dyn std::error::Error>> = match msg {
+                Message::Request { length, .. } => Ok(length),
+                _ => Err("length not found".into()),
+            };
+            let length = length?;
+            
+            let piece = recv.read_to_end(length as usize).await?;
+            println!("received piece from per");
+            
+            self.conn_tx.send(piece).await?;
+        }
         
         conn.closed().await;
         println!("receiving end quic connection closed");
