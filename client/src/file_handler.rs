@@ -150,24 +150,30 @@ fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
 // Returns the Status struct that represents the status of the file download
 fn get_info_status(file_name: String, num_pieces: usize) -> Status {
     let (path, is_new) = get_info_file(file_name);
-    let mut info_file = OpenOptions::new().write(true).create(true).open(&path).unwrap();
+    let mut info_file = OpenOptions::new().write(true).read(true).open(&path).unwrap();
     match is_new {
         // If the .info has never been generated before, construct the file
         true => {
+            let mut buffer: Vec<u8> = Vec::new();
+            let mut buf = [0u8; 1];
+            while let Ok(n) = info_file.read(&mut buf){
+                if n == 0 {
+                    break;
+                }
+                buffer.append(&mut buf.to_vec());
+            }
+
+            Status{
+                pieces_status: buffer
+            }
+        }
+        // .info existed before, so we can read from it
+        false => {
             let pieces= vec![0u8;num_pieces];
             info_file.write_all(&pieces).unwrap();
 
             Status{
                 pieces_status: pieces
-            }
-        }
-        // .info existed before, so we can read from it
-        false => {
-            let mut buffer: Vec<u8> = Vec::new();
-            info_file.read_to_end(&mut buffer).unwrap();
-
-            Status{
-                pieces_status: buffer
             }
         }
     }
@@ -202,7 +208,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
     let part_path = get_part_file(info_hash.name.clone());
 
     // Open the .part file
-    let mut part_file = OpenOptions::new().write(true).create(true).open(&part_path)?;
+    let mut part_file = OpenOptions::new().write(true).open(&part_path)?;
 
     // Seek to the index we need to write to, write the piece, flush the buffer
     // TODO check that seeking ahead in an empty file doesn't cause issues
@@ -212,13 +218,16 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 
     // Update the status of the piece within the .info file
     let mut info_status = get_info_status(info_hash.name.clone(), info_hash.pieces.len());
+    for statuys in info_status.pieces_status.iter_mut(){
+        println!("Piece {}", statuys);
+    }
     info_status.pieces_status[piece_index as usize] = 1u8; // Sets piece at index to true
 
     // Get the .info file and seek to the byte that represents this piece, set it to true
     let (info_file_path, is_new_info) = get_info_file(info_hash.name);
-    let mut info_file = File::open(&info_file_path)?;
+    let mut info_file = OpenOptions::new().write(true).open(&info_file_path)?;
     info_file.seek(SeekFrom::Start(piece_index))?;
-    info_file.write_all(&[1u8])?;
+    info_file.write(&[1u8])?;
     info_file.flush()?;
 
     Ok(())
@@ -245,14 +254,6 @@ pub(crate) fn get_info_hashes() -> std::io::Result<Vec<InfoHash>> {
             results.push(InfoHash::new(file)?)
         }
     }
-    
-    let mut buf: Vec<u8> = Vec::new();
-    buf.push(128);
-    for info_hash in results {
-        write_piece_to_part(info_hash, buf.clone(), 0u64)?
-    }
-    
-    let mut results: Vec<InfoHash> = Vec::new();
 
     // Return the list of hashes
     Ok(results)
