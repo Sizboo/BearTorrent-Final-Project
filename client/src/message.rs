@@ -45,7 +45,7 @@ impl Message{
                 buf.extend_from_slice(hash);
             }
             Message::Piece{ index,  piece } => {
-                buf.extend_from_slice((9 + piece.len() as u32).to_be_bytes().as_ref());
+                buf.extend_from_slice((5 + piece.len() as u32).to_be_bytes().as_ref());
                 buf.push(7);
                 buf.extend_from_slice(&index.to_be_bytes());
                 buf.extend_from_slice(piece);
