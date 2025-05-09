@@ -37,8 +37,8 @@ impl Message{
 
         match self {
             Message::Request{ index, begin, length , hash} => {
-                buf.extend_from_slice(&13u32.to_be_bytes()); // Message is always same length
-                buf.push(26);
+                buf.extend_from_slice(&33u32.to_be_bytes()); // Message is always same length
+                buf.push(6);
                 buf.extend_from_slice(&index.to_be_bytes());
                 buf.extend_from_slice(&begin.to_be_bytes());
                 buf.extend_from_slice(&length.to_be_bytes());
