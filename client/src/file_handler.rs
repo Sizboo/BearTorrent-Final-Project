@@ -252,9 +252,9 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 
     // Update the status of the piece within the .info file
     let mut info_status = get_info_status(info_hash.name.clone(), info_hash.pieces.len());
-    for statuys in info_status.pieces_status.iter_mut(){
-        println!("Piece {}", statuys);
-    }
+    // for statuys in info_status.pieces_status.iter_mut(){
+    //     println!("Piece {}", statuys);
+    // }
     info_status.pieces_status[piece_index as usize] = 1u8; // Sets piece at index to true
 
     // Get the .info file and seek to the byte that represents this piece, set it to true

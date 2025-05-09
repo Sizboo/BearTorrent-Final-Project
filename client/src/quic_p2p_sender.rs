@@ -170,10 +170,10 @@ impl QuicP2PConn {
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("Seeder accepted quic connection");
-        let (mut send, mut recv) = conn.accept_bi().await?;
-        println!("Seeder accepted bi stream!");
-        
         loop {
+            let (mut send, mut recv) = conn.accept_bi().await?;
+            println!("Seeder accepted bi stream!");
+        
             let mut req_buf : [u8; 37] = [0; 37];
             recv.read_exact(&mut req_buf).await?;
             println!("Client received req {:?}", req_buf);
@@ -198,7 +198,7 @@ impl QuicP2PConn {
             let len = msg.len();
 
             send.write_all(msg).await?;
-            // send.finish().await;
+            send.finish()?;
             println!("Seeder sent piece of length {:?}", len);
         }
         
@@ -271,8 +271,8 @@ impl QuicP2PConn {
                         Ok(())
                     });
 
-                println!("Message received of length: {:?}", msg);
                 send.write_all(&msg.encode()).await?;
+                send.finish()?;
                 println!("sent message");
 
                 let res = ret.await?; 
