@@ -4,13 +4,22 @@ use crate::connection::connection::*;
 use crate::message::Message;
 use crate::piece_assembler::*;
 use tokio::sync::{mpsc, RwLock};
-use crate::file_handler;
+use crate::{connection, file_handler};
 use crate::file_handler::write_piece_to_part;
 use crate::peer_connection::PeerConnection;
 
 /// this represents a connection between 2 peers
 #[derive(Debug)]
 pub struct FileAssembler {
+    /// the sender we will use to send to a PieceAssembler
+    // snd_tx: mpsc::Sender<Message>,
+    /// the receiver we will let a PieceAssembler borrow so we can send to it
+    // snd_rx: mpsc::Receiver<Message>,
+    
+    // torrent_client: &'a mut TorrentClient,
+    // 
+    // peer_list: Vec<PeerId>,
+    
     ///the sender used for LAN/P2P/QUIC to send data from
     conn_tx: mpsc::Sender<Message>, 
     /// sender used to send file requests across a connection
@@ -18,31 +27,31 @@ pub struct FileAssembler {
 }
 
 impl FileAssembler {
-    
+
     pub async fn new(file_handler: file_handler::InfoHash) -> Self {
         let (conn_tx, conn_rx) = mpsc::channel::<Message>(50);
         let assembler = FileAssembler {
             conn_tx,
             request_txs: Vec::new(),
         };
-        
+
         tokio::spawn(async move {
             Self::reassemble_loop(conn_rx, file_handler).await
         });
-        
-        assembler 
+
+        assembler
     }
-    
+
     pub fn get_conn_tx(&self) -> mpsc::Sender<Message> {
         self.conn_tx.clone()
     }
-    
+
     pub async fn send_requests(
         &self,
         num_connections: usize,
         file_hash: InfoHash
     ) -> Result<(), Box<dyn std::error::Error>> {
-        
+
            //todo yeah this is dumb
         let info_hash = file_handler::InfoHash::server_to_client_hash(file_hash.clone());
         let hash = info_hash.get_hashed_info_hash();
@@ -61,8 +70,8 @@ impl FileAssembler {
             self.request_txs.get(i % num_connections)
                 .ok_or(Box::<dyn std::error::Error>::from("Could not retrieve connection rx"))?
                 .send(request).await?;
-            
-        } 
+
+        }
         
         Ok(())
     }
@@ -74,7 +83,7 @@ impl FileAssembler {
         request_rx
     }
     
-    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: file_handler::InfoHash) 
+    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: file_handler::InfoHash)
         -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let num_pieces = info_hash.pieces.len();
         
@@ -83,7 +92,7 @@ impl FileAssembler {
            
            let (index, piece) = match msg {
                Message::Piece { index, piece  } => (index, piece),
-               _ => Err(Box::<dyn std::error::Error + Send + Sync>::from("wrong message type"))?, 
+               _ => Err(Box::<dyn std::error::Error + Send + Sync>::from("wrong message type"))?,
            };
 
            println!("Received Piece: {}", index);

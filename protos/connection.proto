@@ -59,7 +59,7 @@ message FileList {
 message InfoHash {
     string name = 1;
     uint64 file_length = 2;
-    uint64 piece_length = 3;
+    uint32 piece_length = 3;
     repeated PieceHash pieces  = 4;
 }
 
