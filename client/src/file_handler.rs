@@ -167,7 +167,7 @@ impl connection::InfoHash {
 // Checks if a file exists, if it doesn't then it is created.
 // Returns the PathBuf to this file
 fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::Result<(PathBuf, bool)> {
-    let temp_file_name = format!("resources/{}/{}{}", src, file_name, extension);
+    let temp_file_name = format!("../{}/{}{}", src, file_name, extension);
     println!("Temp file name: {}", temp_file_name);
     let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
         Ok(true) => (PathBuf::from(temp_file_name), true),
