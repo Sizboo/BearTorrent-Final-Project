@@ -1,6 +1,5 @@
-use std::any::Any;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{ SocketAddr};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -8,17 +7,15 @@ use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Connection, Endpoint, TokioRuntime};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::torrent_client::TorrentClient;
-use crate::peer_connection::PeerConnection;
-use crate::connection::connection::{PeerId, CertMessage, Cert};
+use crate::connection::connection::{PeerId, CertMessage, Cert, InfoHash};
 use crate::message::Message;
-use tokio::{net::UdpSocket as TokioUdpSocket, sync::mpsc};
-use tokio::io::AsyncWriteExt;
+use tokio::{net::UdpSocket as TokioUdpSocket};
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tonic::Request;
-use crate::file_handler::{read_piece_from_file, InfoHash};
+use crate::file_handler::{read_piece_from_file };
 
 pub struct QuicP2PConn {
     endpoint: Endpoint,

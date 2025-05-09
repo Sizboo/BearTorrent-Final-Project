@@ -9,9 +9,9 @@ use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use tonic::Request;
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FileMessage, FullId, PeerId};
+use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FileMessage, FullId, PeerId, InfoHash};
 use crate::file_assembler::FileAssembler;
-use crate::file_handler::{get_info_hashes, InfoHash};
+use crate::file_handler::{get_info_hashes};
 use crate::peer_connection::PeerConnection;
 
 #[derive(Debug, Clone)]
@@ -171,7 +171,7 @@ impl TorrentClient {
         //we want to maximize connection which means either one connection per piece
         // or one connection per peer whichever is less.
         let num_connections = min(peer_list.len(), file_hash.pieces.len());
-        let mut assembler = FileAssembler::new(InfoHash::server_to_client_hash(file_hash.clone())).await;
+        let mut assembler = FileAssembler::new(file_hash.clone()).await;
 
         let mut connection_handles = Vec::new();
         //spawn the correct number of connections
@@ -219,7 +219,7 @@ impl TorrentClient {
         let my_hashes = self.file_hashes.read().await.clone().into_values();
 
         for hash in my_hashes {
-            self.advertise(hash.get_server_info_hash()).await?;
+            self.advertise(hash).await?;
         }
 
         Ok(())
@@ -229,10 +229,7 @@ impl TorrentClient {
         let mut server_connection = self.client.clone();
 
         let res = server_connection.get_all_files(Request::new(())).await?;
-        let server_info_hashes = res.into_inner().info_hashes;
-
-        let info_hashes = server_info_hashes.iter()
-            .map(|x| InfoHash::server_to_client_hash(x.clone())).collect::<Vec<_>>();
+        let info_hashes = res.into_inner().info_hashes;
 
         Ok(info_hashes)
 

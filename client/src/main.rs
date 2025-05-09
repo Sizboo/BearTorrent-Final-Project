@@ -11,7 +11,7 @@ mod message;
 use std::collections::HashMap;
 use std::io::Write;
 use peer_connection::PeerConnection;
-use crate::file_handler::InfoHash;
+use crate::connection::connection::InfoHash;
 use crate::torrent_client::TorrentClient;
 
 
@@ -66,10 +66,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::io::stdin().read_line(&mut input)?;
             let command: u16 = input.trim().parse().expect("Invalid number");
             
-            let file_requested = file_selection.get(&command).unwrap();
+            let file_requested = file_selection.remove(&command).unwrap();
             println!("You Requested: {}", file_requested.name);
             
-            torrent_client.file_request(InfoHash::get_server_info_hash(file_requested)).await?;
+            torrent_client.file_request(file_requested).await?;
             
             
 

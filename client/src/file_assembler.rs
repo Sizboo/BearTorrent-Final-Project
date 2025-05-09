@@ -1,25 +1,13 @@
-use std::fs::File;
-use std::sync::Arc;
-use crate::connection::connection::*;
+use crate::connection::connection::{InfoHash};
 use crate::message::Message;
-use crate::piece_assembler::*;
-use tokio::sync::{mpsc, RwLock};
-use crate::{connection, file_handler};
+use tokio::sync::{mpsc};
+use crate::{file_handler};
 use crate::file_handler::write_piece_to_part;
-use crate::peer_connection::PeerConnection;
 
 /// this represents a connection between 2 peers
 #[derive(Debug)]
 pub struct FileAssembler {
-    /// the sender we will use to send to a PieceAssembler
-    // snd_tx: mpsc::Sender<Message>,
-    /// the receiver we will let a PieceAssembler borrow so we can send to it
-    // snd_rx: mpsc::Receiver<Message>,
-    
-    // torrent_client: &'a mut TorrentClient,
-    // 
-    // peer_list: Vec<PeerId>,
-    
+
     ///the sender used for LAN/P2P/QUIC to send data from
     conn_tx: mpsc::Sender<Message>, 
     /// sender used to send file requests across a connection
@@ -28,7 +16,7 @@ pub struct FileAssembler {
 
 impl FileAssembler {
 
-    pub async fn new(file_handler: file_handler::InfoHash) -> Self {
+    pub async fn new(file_handler: InfoHash) -> Self {
         let (conn_tx, conn_rx) = mpsc::channel::<Message>(50);
         let assembler = FileAssembler {
             conn_tx,
@@ -52,11 +40,10 @@ impl FileAssembler {
         file_hash: InfoHash
     ) -> Result<(), Box<dyn std::error::Error>> {
 
-           //todo yeah this is dumb
-        let info_hash = file_handler::InfoHash::server_to_client_hash(file_hash.clone());
-        let hash = info_hash.get_hashed_info_hash();
 
-        for i in 0..info_hash.pieces.len() {
+        let hash = file_hash.get_hashed_info_hash();
+        
+        for i in 0..file_hash.pieces.len() {
 
             let request = Message::Request {
                 index : i as u32,
@@ -83,7 +70,7 @@ impl FileAssembler {
         request_rx
     }
     
-    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: file_handler::InfoHash)
+    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: InfoHash)
         -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let num_pieces = info_hash.pieces.len();
         
