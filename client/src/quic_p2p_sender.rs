@@ -192,12 +192,12 @@ impl QuicP2PConn {
 
 
             let piece = read_piece_from_file(info_hash, index)?;
-
+            let len = piece.len();
+            
             let msg = Message::Piece { index, piece };
 
 
             let msg = &msg.encode();
-            let len = msg.len();
             send.write_all(msg).await?;
             println!("Seeder sent piece of length {:?}", len);
             send.finish()?;
@@ -263,6 +263,7 @@ impl QuicP2PConn {
 
                 let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
                     tokio::spawn(async move {
+                        println!("requester waiting for length {:?}", length);
                         let piece = recv.read_to_end(length as usize + 12).await?;
                         println!("received piece from peer");
 
