@@ -251,11 +251,10 @@ impl QuicP2PConn {
                 let conn_tx_clone = conn_tx.clone(); 
                 
                 
-                let length: Result<u32, Box<dyn std::error::Error>> = match msg {
-                    Message::Request { length, .. } => Ok(length),
-                    _ => Err("length not found".into()),
+                let (index, length) = match msg {
+                    Message::Request { index,length,.. } => (index, length),
+                    _ => Err("length not found")?,
                 };
-                let length = length?;
 
                 let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
                     tokio::spawn(async move {
@@ -273,7 +272,7 @@ impl QuicP2PConn {
 
                 send.write_all(&msg.encode()).await?;
                 send.finish()?;
-                println!("sent message");
+                println!("sent message requesting: {}", index);
 
                 let res = ret.await?; 
                 if res.is_err() {
