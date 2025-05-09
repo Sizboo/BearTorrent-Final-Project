@@ -264,12 +264,13 @@ impl QuicP2PConn {
                 let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
                     tokio::spawn(async move {
                         println!("requester waiting for length {:?}", length + 9);
-                        let piece = recv.read_to_end(length as usize + 9).await?;
+                        let mut buf = vec![0u8; (length + 9) as usize];
+                        recv.read_exact(&mut buf).await?;
                         println!("received piece from peer");
 
-                        let msg = Message::decode(piece).ok_or("failed to decode message")?;
+                        let piece = Message::decode(buf).ok_or("failed to decode message")?;
 
-                        conn_tx_clone.send(msg).await?;
+                        conn_tx_clone.send(piece).await?;
 
                         Ok(())
                     });
