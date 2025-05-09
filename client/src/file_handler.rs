@@ -271,15 +271,15 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 pub(crate) fn read_piece_from_file(info_hash: InfoHash, piece_index: u32) -> std::io::Result<Vec<u8>>{
     let file_path = get_file(info_hash.name.clone());
     let mut file = OpenOptions::new().read(true).open(&file_path)?;
-    
+
     let piece_length = if (info_hash.pieces.len() - 1) == piece_index as usize {
         info_hash.file_length as usize - (info_hash.piece_length as usize * (info_hash.pieces.len() - 1))
     } else {
         info_hash.piece_length as usize
     };
-    
+
     let mut buf= vec![0u8;piece_length];
-    
+
     file.seek(SeekFrom::Start((info_hash.piece_length * piece_index) as u64))?;
     file.read_exact(&mut buf)?;
     Ok(buf)
