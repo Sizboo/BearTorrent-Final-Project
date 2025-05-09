@@ -174,11 +174,12 @@ impl QuicP2PConn {
         println!("Seeder accepted bi stream!");
         
         loop {
-            let req = recv.read_to_end(64 * 10240 ).await?;
-            println!("Client received req {:?}", req);
+            let mut req_buf : [u8; 32] = [0; 32];
+            recv.read_exact(&mut req_buf).await?;
+            println!("Client received req {:?}", req_buf);
 
             let mut request = None;
-            if let Some(msg) = Message::decode(req) {
+            if let Some(msg) = Message::decode(Vec::from(req_buf)) {
                 request = match msg {
                     Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
                     _ => None,
@@ -195,6 +196,7 @@ impl QuicP2PConn {
 
 
             send.write_all(&msg.encode()).await?;
+            send.finish()?;
             println!("Seeder sent piece {:?}", msg);
         }
         
