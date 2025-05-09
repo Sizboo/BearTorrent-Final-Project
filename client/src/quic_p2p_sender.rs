@@ -155,7 +155,6 @@ impl QuicP2PConn {
         match res {
             Ok(conn) => {
                
-                //todo do this until figure out static bind
                 QuicP2PConn::send_data(conn, file_map).await?;
                 
                 Ok(())
@@ -224,12 +223,9 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-                tokio::spawn(async move {
-                    let res = QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await;
-                    if res.is_err() {
-                        eprintln!("{:?}", res);
-                    }
-                });
+                
+                QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await?;
+            
                 Ok(()) 
             }
             Err(e) => {
