@@ -5,6 +5,7 @@ import FileDetailSidebar from "./components/FileDetailSidebar";
 import "./index.css";
 import "./shimmer.css";
 import './modern-styles.css';
+import { sayHello } from "./controllers/demoController";
 
 const initialFiles = [
     { name: "report.pdf", size: 1.2, type: "PDF", lastModified: "2023-09-12" },
@@ -14,6 +15,13 @@ const initialFiles = [
 ];
 
 export default function App() {
+
+
+    function handleClick() {
+        sayHello().then(alert).catch(console.error);
+    }
+
+
     const [selected, setSelected] = useState(null);
     const [sortField, setSortField] = useState("name");
     const [sortAsc, setSortAsc] = useState(true);
@@ -35,7 +43,7 @@ export default function App() {
                 <nav className="flex gap-6">
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Home</button>
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Upload</button>
-                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Settings</button>
+                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleClick}>Settings</button>
                 </nav>
             </header>
 
