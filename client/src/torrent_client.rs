@@ -1,199 +1,158 @@
-use std::any::Any;
+use std::cmp::min;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{ErrorKind};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
-use stunclient::StunClient;
-use tokio::{net::UdpSocket, sync::mpsc};
+use std::io::ErrorKind;
+use std::net::{IpAddr, SocketAddrV4, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::Duration;
-use tonic::{Request, Response};
-use crate::quic_p2p_sender::QuicP2PConn;
-use crate::turn_fallback::TurnFallback;
-use crate::server_connection::ServerConnection;
-use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId, InfoHash as ConnHash, FileList};
-use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
-use rcgen::Error;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, timeout};
-use crate::file_handler;
+use stunclient::StunClient;
+use tokio::net::UdpSocket;
+use tokio::sync::RwLock;
+use tonic::Request;
+use tonic::transport::{Channel, ClientTlsConfig};
+use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FileMessage, FullId, PeerId};
+use crate::file_assembler::FileAssembler;
 use crate::file_handler::{get_info_hashes, InfoHash};
-use crate::file_assembler::*;
-use crate::message::Message;
+use crate::peer_connection::PeerConnection;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TorrentClient {
-    pub(crate) server: ServerConnection,
-    pub(crate) pub_socket: Option<UdpSocket>,
-    pub(crate) priv_socket: Option<UdpSocket>,
-    pub(crate) self_addr: PeerId,
-    // peer_conns: Vec<PeerConnection>,
+    pub(crate) client: connector_client::ConnectorClient<Channel>,
+    pub(crate) turn: turn_client::TurnClient<Channel>,
+    pub(crate) uid: ClientId,
+    pub(crate) file_hashes: Arc<RwLock<HashMap<[u8;20], InfoHash>>>
 }
 
+const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
+
 impl TorrentClient {
-    // // pub async fn new(server: &mut ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
-    // // 
-    // //     //bind port and get public facing id
-    // //     let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-    // //     let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
-    // //     let client = StunClient::new(stun_server);
-    // //     let external_addr = client.query_external_address(&socket)?;
-    // // 
-    // //     let ipaddr =  match external_addr.ip() {
-    // //         IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
-    // //         IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
-    // //     }?;
-    // // 
-    // //     println!("My public IP {}", external_addr.ip());
-    // //     println!("My public PORT {}", external_addr.port());
-    // // 
-    // //     // Get the local IP address of this machine (defaults to Ipv4)
-    // //     let priv_ipaddr = match local_ip() {
-    // //         Ok(ip) => {
-    // //             match ip {
-    // //                 IpAddr::V4(v4) => v4,
-    // //                 IpAddr::V6(_) => return Err(Box::new(std::io::Error::new(ErrorKind::Other, "Cannot convert IPv6 to u32"))),
-    // //             }
-    // //         }
-    // //         Err(err) => return Err(Box::new(err)),
-    // //     };
-    // // 
-    // //     let priv_port = 50000;
-    // // 
-    // //     println!("My private IP {:?}", priv_ipaddr);
-    // //     println!("My private port is {}", priv_port);
-    // // 
-    // //     let priv_socket = UdpSocket::bind(SocketAddrV4::new(priv_ipaddr, priv_port)).await?;
-    // // 
-    // //     let self_addr = PeerId {
-    // //         ipaddr,
-    // //         port: external_addr.port() as u32,
-    // //         priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
-    // //         priv_port: priv_port as u32,
-    // //     };
-    // //     socket.set_nonblocking(true)?;
-    // //     
-    // //     server.update_registered_peer_id(self_addr.clone()).await?;
-    // //     
-    // //     let server = server.clone();
-    // //     
-    // //     
-    // //     
-    // //     Ok(
-    // //         TorrentClient {
-    // //             server,
-    // //             pub_socket: Some(UdpSocket::try_from(socket)?) ,
-    // //             priv_socket: Some(priv_socket),
-    // //             self_addr,
-    // //         },
-    // //     )
-    // }
+    pub (crate) async fn new() -> Result<TorrentClient, Box<dyn std::error::Error>> {
+        //tls config
+        //webki roots uses Mozilla's certificate store
+        let tls = ClientTlsConfig::new()
+            .with_webpki_roots()
+            .domain_name("helpful-serf-server-1016068426296.us-south1.run.app");
 
-    async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
+        let endpoint = Channel::from_static(GCLOUD_URL).tls_config(tls)?
+            .connect().await?;
 
-        //todo maybe don't take this here
-        let socket_arc = Arc::new(self.pub_socket.take().unwrap());
-        let socket_clone = socket_arc.clone();
-        let cancel_token = CancellationToken::new();
-        let token_clone = cancel_token.clone();
+        let mut client = connector_client::ConnectorClient::new(endpoint.clone());
+        let turn = turn_client::TurnClient::new(endpoint);
+        
+        let uid = client.register_client(ClientRegistry { peer_id: None} ).await?;
+        let uid = uid.into_inner();
 
-        let punch_string = b"HELPFUL_SERF";
-
-        println!("Starting Send to peer ip: {}, port: {}", peer_addr.ip(), peer_addr.port());
-
-        let send_task = tokio::spawn(async move {
-            for i in 0..50 {
-                let res = socket_arc.send_to(punch_string, peer_addr).await;
-
-                if res.is_err() {
-                    println!("Send Failed: {}", res.err().unwrap());
-                }
-
-                if token_clone.is_cancelled() {
-                    println!("Send Cancelled");
-                    return Ok(socket_arc);
-                }
-
-                sleep(Duration::from_millis(10)).await;
-            }
-            Err(Box::<dyn std::error::Error + Send + Sync>::from("send task finished without succeeding"))
-        });
-
-
-        let read_task = tokio::spawn( async move {
-            let mut recv_buf = [0u8; 1024];
-            
-            let result = timeout(Duration::from_secs(5), async {
-                loop {
-                    match socket_clone.recv_from(&mut recv_buf).await {
-                        Ok((n, src)) => {
-                            println!("Received from {}: {:?}", src, &recv_buf[..n]);
-                            if &recv_buf[..n] == punch_string {
-                                // println!("Punched SUCCESS {}", src);
-
-                                cancel_token.cancel();
-                                drop(socket_clone);
-                                return Ok(());
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Recv error: {}", e);
-                            return Err(Box::<dyn std::error::Error + Send + Sync>::from(e));
-                        },
-                    }
-                }
-            }).await;
-            
-            match result {
-                Ok(res) => Ok(res),
-                Err(e) => Err(e),
-            } 
-        });
-
-        let socket_arc = match send_task.await {
-            Ok(Ok(socket)) => socket,
-            Ok(Err(e)) => return Err(e),
-            Err(join_err) => return Err(Box::new(join_err)),
+        let file_hashes = match get_info_hashes(){
+            Ok(file_hashes) => file_hashes,
+            Err(err) => return Err(Box::new(err)),
         };
 
-        let read_res = read_task.await?;
-        match read_res {
-            Ok(_) => {
-                let socket = Arc::try_unwrap(socket_arc).unwrap();
-                println!("Punch Success: {:?}", socket);
-                Ok(socket)
+        Ok(
+            TorrentClient {
+                client,
+                turn,
+                uid,
+                file_hashes: Arc::new(RwLock::new(file_hashes)),
             }
-            _ => { Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out"))) }
-        }
+        )
+    }
+    async fn register_new_connection(&mut self) -> Result<PeerConnection, Box<dyn std::error::Error>> {
+        //bind port and get public facing id
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+        let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
+        let client = StunClient::new(stun_server);
+        let external_addr = client.query_external_address(&socket)?;
 
+        let ipaddr =  match external_addr.ip() {
+            IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
+            IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
+        }?;
+
+        println!("My public IP {}", external_addr.ip());
+        println!("My public PORT {}", external_addr.port());
+
+        // Get the local IP address of this machine (defaults to Ipv4)
+        let priv_ipaddr = match local_ip() {
+            Ok(ip) => {
+                match ip {
+                    IpAddr::V4(v4) => v4,
+                    IpAddr::V6(_) => return Err(Box::new(std::io::Error::new(ErrorKind::Other, "Cannot convert IPv6 to u32"))),
+                }
+            }
+            Err(err) => return Err(Box::new(err)),
+        };
+
+
+        let priv_addr= SocketAddrV4::new(priv_ipaddr, 0); 
+        let priv_socket = UdpSocket::bind(priv_addr).await?;
+
+        let priv_port = priv_addr.port();
+        
+        println!("My private IP {:?}", priv_ipaddr);
+        println!("My private port is {}", priv_port);
+
+
+        let self_addr = PeerId {
+            ipaddr,
+            port: external_addr.port() as u32,
+            priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
+            priv_port: priv_port as u32,
+        };
+        socket.set_nonblocking(true)?;
+
+        self.update_registered_peer_id(self_addr.clone()).await?;
+
+        let server = self.clone();
+
+        Ok(
+            PeerConnection {
+                server,
+                pub_socket: Some(UdpSocket::try_from(socket)?) ,
+                priv_socket: Some(priv_socket),
+                self_addr,
+            },
+        ) 
+    }
+    async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+        
+        let mut server_conn = self.client.clone();
+        
+        
+        match server_conn.update_registered_peer_id(
+            FullId { 
+                self_id: Option::from(self.uid.clone()), 
+                peer_id: Some(self_addr)
+            }
+        ).await {
+            Ok(res) => Ok(()),
+            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error>),
+        }
+        
     }
 
-   
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
-    pub async fn seeding(server: &mut ServerConnection) -> Result<(), Box<dyn std::error::Error>> {
-        
-        loop {
-            let mut torrent_client = server.register_new_client().await?;
+    pub async fn seeding(&mut self) -> Result<(), Box<dyn std::error::Error>> {
 
-            let mut server_client = torrent_client.server.client.clone();
+        loop {
+            let mut peer_connection = self.register_new_connection().await?;
+
+            let mut server_client = self.client.clone();
 
             //update server's list of seeder files
-            torrent_client.advertise_all().await?;            
+            self.advertise_all().await?;
 
             // calls get_peer
-            let uid = torrent_client.server.uid.clone();
-            let response = server_client.seed(uid).await;
+            let response = server_client.seed(peer_connection.self_addr.clone()).await;
 
             // waits for response from get_peer
             match response {
                 Ok(res) => {
-
-                    let res = torrent_client.seeder_connection(res).await;
-                    if res.is_err() {
-                        println!("Connect Failed: {}", res.err().unwrap());
-                    }
+                    tokio::spawn(async move {
+                        let res = peer_connection.seeder_connection(res).await;
+                        if res.is_err() {
+                            println!("Connect Failed: {}", res.err().unwrap());
+                        }
+                    });
 
                 }
                 Err(e) => {
@@ -202,207 +161,75 @@ impl TorrentClient {
             }
         }
     }
-    
-    pub async fn seeder_connection(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
-        let peer_id = res.into_inner();
-        let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-        let pub_port = peer_id.port as u16;
-        let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
-
-        // create a PeerConnection and get the receiver
-
-        println!("peer to send {:?}", peer_id);
-
-        //1. try connection over local NAT
-        if self.self_addr.ipaddr == peer_id.ipaddr {
-            //start quick server
-            let socket = self.priv_socket.take().unwrap();
-            let mut p2p_sender = QuicP2PConn::create_quic_server(
-                socket, 
-                peer_id, 
-                self.server.clone(), 
-                Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
-            ).await?;
-            // println!("P2P quic endpoint created successfully");
-            let res = p2p_sender.quic_listener(self.server.file_hashes.clone()).await;
-            match res {
-                Ok(()) => {
-                    println!("SEEDER: Quic connection within LAN success!");
-                    // conn_success = true
-                    return Ok(());
-                },
-                Err(e) => {
-                    println!("SEEDER: LAN based quic connection failed\n {:?}", e);
-                }
-            }
-        }
-        
-        //2. try connection across NAT
-        {
-            let timeout_duration = Duration::from_secs(4);
-            let res = timeout(
-                timeout_duration, 
-                self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
-            ).await?;
-            
-            match res {
-                Ok(_) => {
-                    if let Ok(socket) = self.hole_punch(peer_addr).await {
-                        // println!("Returned value {:?}", socket);
-                        //start quick server
-                        
-                        
-                        let mut p2p_sender = QuicP2PConn::create_quic_server(
-                            socket,
-                            peer_id,
-                            self.server.clone(),
-                            Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
-                        ).await?;
-                        // println!("SEEDER: P2P quic endpoint across NAT created successfully");
-                        match p2p_sender.quic_listener(self.server.file_hashes.clone()).await {
-                            Ok(()) => {
-                                println!("SEEDER: Quic connection across NAT successful!");
-                                return Ok(())
-                            },
-                            Err(e) => {
-                                println!("SEEDER: Connection across NAT after hole punch failed");
-                            }
-                        }
-                    } 
-                },
-                Err(e) => {
-                    println!("SEEDER: Failed to receive hole punch trigger");
-                }
-            }
-        }
-            
-        // Fall back connection on TURN
-        {
-      
-            // TURN for sending here
-            // let client_id = self.server.uid.clone();
-            // 
-            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx).await?;
-            // 
-            // 
-            // // TODO probably develop a better way to do the actual send over TURN...
-            // let response = self.server.client.get_client_id(peer_id).await?;
-            // let target = response.into_inner();
-            // let buf = "data sent over TURN".as_bytes().to_vec();
-            // 
-            // tokio::time::sleep(Duration::from_millis(1000)).await;
-            // fallback.send_to(target, buf).await?;
-            // println!("SEEDER fallback to TURN")
-        }
-
-        Ok(())
-    }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&mut self, file_hash: ConnHash) -> Result<(), Box<dyn std::error::Error>> {
-        let mut client = self.server.client.clone();
+    pub async fn file_request(&mut self, file_hash: crate::connection::connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+        let mut client = self.client.clone();
+
+        let peer_list = client.get_file_peer_list(file_hash.clone()).await?.into_inner().list;
         
+        //we want to maximize connection which means either one connection per piece
+        // or one connection per peer whichever is less.
+        let num_connections = min(peer_list.len(), file_hash.pieces.len());
+        let mut assembler = FileAssembler::new(InfoHash::server_to_client_hash(file_hash.clone())).await;
         
-        let request = Request::new(FileMessage {
-            id: Some(self.server.uid.clone()),
-            info_hash: Some(file_hash.clone()),
-        });
-        
-        let peer_list = client.send_file_request(request).await?.into_inner().list;
-        
-        
-        let res = FileAssembler::assemble(self, peer_list, file_hash).await;
-        
-        if res.is_err() {
-            eprintln!("Failed to assemble FileAssembler");
+        //spawn the correct number of connections
+        for i in 0..num_connections {
+            let mut peer_connection = self.register_new_connection().await?;
+
+            let conn_tx = assembler.get_conn_tx();
+            let request_rx = assembler.subscribe_new_connection();
+            let peer_id = peer_list[i];
+            tokio::spawn(async move {
+                
+                let res = peer_connection.requester_connection(peer_id,conn_tx, request_rx).await;
+                if res.is_err() {
+                    eprintln!("connection error: {}", res.err().unwrap());
+                }
+            });
         }
-         
+        
+        //begin assemble task
+        assembler.send_requests(num_connections, file_hash).await?;
+
         Ok(())
     }
 
-    ///Used when client is requesting a file
-    pub async fn requester_connection(&mut self, peer_id: PeerId, conn_tx: mpsc::Sender<Message>, mut conn_rx:  mpsc::Receiver<Message> ) -> Result<(), Box<dyn std::error::Error>> {
-        
-        //init the map so cert can be retrieved
-        let mut server_connection = self.server.client.clone();
-        server_connection.init_cert_sender(self.self_addr).await?;
+    pub async fn advertise(&self, info_hash: crate::connection::connection::InfoHash) -> Result<ClientId, Box<dyn std::error::Error>> {
+        let mut client = self.client.clone();
 
-        let conn_rx = Arc::new(Mutex::new(conn_rx));
+        //todo make hash active
+        let request = Request::new(FileMessage {
+            id: Some(self.uid.clone()),
+            info_hash: Some(info_hash),
+        });
 
-        if self.self_addr.ipaddr == peer_id.ipaddr {
-            let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
-            let port = peer_id.priv_port as u16;
-            let lan_peer_addr = SocketAddr::from((ip_addr, port));
-            let priv_socket = self.priv_socket.take().unwrap();
+        let resp = client.advertise(request).await?;
 
-            let mut p2p_conn = QuicP2PConn::create_quic_client(
-                priv_socket,
-                self.self_addr,
-                self.server.clone(),
-            ).await?;
-            
+        Ok(resp.into_inner())
+    }
 
-            match p2p_conn.connect_to_peer_server(lan_peer_addr, conn_tx.clone(), conn_rx.clone()).await {
-                Ok(()) => {
-                    println!("REQUESTER: successful connection within LAN");
-                    return Ok(())
-                },
-                Err(_) => {
-                    println!("REQUESTER: connect over LAN failed");
-                }
-            }
-        }
+    async fn advertise_all(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let my_hashes = self.file_hashes.read().await.clone().into_values();
 
-        {    
-            let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-            let port = peer_id.port as u16;
-            let peer_addr = SocketAddr::from((ip_addr, port));
-
-            //add pause to give other peer time to wait on notify handle
-            sleep(Duration::from_millis(1000)).await;
-            
-            //initiate hole punch routine with other peer
-            server_connection.init_punch(peer_id).await?;
-            
-            sleep(Duration::from_millis(250)).await;
-            
-            if let Ok(socket) = self.hole_punch(peer_addr).await {
-                let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-                let port = peer_id.port as u16;
-                let peer_addr = SocketAddr::from((ip_addr, port));
-
-                let mut p2p_conn = QuicP2PConn::create_quic_client(
-                    socket,
-                    self.self_addr,
-                    self.server.clone(),
-                ).await?;
-                
-                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx, conn_rx).await {
-                    Ok(()) => {
-                        println!("REQUESTER: successful connection across NAT");
-                        return Ok(())
-                    },
-                    Err(_) => {
-                        println!("REQUESTER: connect across NAT failed");
-                    }
-                }
-            } 
-        }
-            
-        
-        {
-            // TURN for receiving here
-            // let client_id = self.server.uid.clone();
-            // 
-            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx.clone()).await?;
-            // 
-            // // TODO remove... just needed to have this to keep the program open long enough to receive data
-            // tokio::time::sleep(Duration::from_secs(5)).await;
-            // 
-            // println!("REQUESTER: fallback to TURN succeeded");
+        for hash in my_hashes {
+            self.advertise(hash.get_server_info_hash()).await?;
         }
 
         Ok(())
+    }
+
+    pub async fn get_server_files(&self) -> Result<Vec<InfoHash>, Box<dyn std::error::Error>> {
+        let mut server_connection = self.client.clone();
+
+        let res = server_connection.get_all_files(Request::new(())).await?;
+        let server_info_hashes = res.into_inner().info_hashes;
+
+        let info_hashes = server_info_hashes.iter()
+            .map(|x| InfoHash::server_to_client_hash(x.clone())).collect::<Vec<_>>();
+
+        Ok(info_hashes)
+
     }
 
     /// announce is a method used update server with connection details
@@ -410,42 +237,5 @@ impl TorrentClient {
     /// this is essentially a "keep alive" method
     pub async fn announce(&self) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
-    }
-    
-    pub async fn advertise(&self, info_hash: ConnHash) -> Result<ClientId, Box<dyn std::error::Error>> {
-        let mut client = self.server.client.clone();
-        
-        //todo make hash active
-        let request = Request::new(FileMessage {
-            id: Some(self.server.uid.clone()),
-            info_hash: Some(info_hash),
-        });
-        
-        let resp = client.advertise(request).await?;
-        
-        Ok(resp.into_inner())
-    }
-    
-    async fn advertise_all(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let my_hashes = self.server.file_hashes.read().await.clone().into_values();
-
-        for hash in my_hashes {
-           self.advertise(hash.get_server_info_hash()).await?; 
-        } 
-        
-        Ok(())
-    }
-    
-    pub async fn get_server_files(&self) -> Result<Vec<InfoHash>, Box<dyn std::error::Error>> {
-       let mut server_connection = self.server.client.clone();
-        
-        let res = server_connection.get_all_files(Request::new(())).await?;
-        let server_info_hashes = res.into_inner().info_hashes;
-        
-        let info_hashes = server_info_hashes.iter()
-            .map(|x| InfoHash::server_to_client_hash(x.clone())).collect::<Vec<_>>();
-        
-        Ok(info_hashes)
-        
     }
 }

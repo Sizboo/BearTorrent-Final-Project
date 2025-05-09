@@ -6,7 +6,7 @@ use crate::piece_assembler::*;
 use tokio::sync::{mpsc, RwLock};
 use crate::file_handler;
 use crate::file_handler::write_piece_to_part;
-use crate::torrent_client::TorrentClient;
+use crate::peer_connection::PeerConnection;
 
 /// this represents a connection between 2 peers
 #[derive(Debug)]
@@ -27,66 +27,57 @@ pub struct FileAssembler {
 }
 
 impl FileAssembler {
-    pub async fn assemble<'a>(
-        torrent_client: &'a mut TorrentClient,
-        mut peer_list: Vec<PeerId>,
-        file_hash: InfoHash
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // let (snd_tx, snd_rx) = mpsc::channel::<Message>(10); // PieceAssembler sender/receiver
-        let (conn_tx, conn_rx) = mpsc::channel::<Message>(50); // 'connection' sender/receiver
-
-        
-       let mut assembler = FileAssembler {
-            // torrent_client,
-            // peer_list,
+    
+    pub async fn new(file_handler: file_handler::InfoHash) -> Self {
+        let (conn_tx, conn_rx) = mpsc::channel::<Message>(50);
+        let assembler = FileAssembler {
             conn_tx,
             request_txs: Vec::new(),
         };
-
-        //todo yeah this is dumb
+        
+        tokio::spawn(async move {
+            Self::reassemble_loop(conn_rx, file_handler)    
+        });
+        
+        assembler 
+    }
+    
+    pub fn get_conn_tx(&self) -> mpsc::Sender<Message> {
+        self.conn_tx.clone()
+    }
+    
+    pub async fn send_requests(
+        &self,
+        num_connections: usize,
+        file_hash: InfoHash
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        
+           //todo yeah this is dumb
         let info_hash = file_handler::InfoHash::server_to_client_hash(file_hash.clone());
         let hash = info_hash.get_hashed_info_hash();
 
-        tokio::spawn(async move {
-            let res = FileAssembler::reassemble_loop(conn_rx, info_hash).await;
-            if res.is_err() {
-                eprintln!("{:?}", res);
-            }
-        });
-
-        //todo figure out how to delegate evenly to peers in list
-        let peer = peer_list.pop().unwrap();
-
-        
-        let mut index = 0;
-        let conn_tx = assembler.conn_tx.clone();
-        let conn_rx = assembler.subscribe_new_connection();
-        torrent_client.requester_connection(peer, conn_tx, conn_rx).await?;
-        
-        //todo this must be fixed with iterating through peerlist too
-        let request_tx = assembler.request_txs.pop().unwrap();
-
-        for piece in file_hash.pieces {
+        for i in 0..num_connections {
 
             let request = Message::Request {
-                index,
-                begin: file_hash.piece_length as u32 * index,
+                index : 0,
+                begin: file_hash.piece_length as u32 * i as u32,
                 length: file_hash.piece_length as u32,
                 hash,
             };
 
             
-            println!("Sending piece request {}", index);
-            request_tx.send(request).await?;
+            println!("Sending piece request {}", i);
+            self.request_txs.get(i % num_connections)
+                .ok_or(Box::<dyn std::error::Error>::from("Could not retrieve connection rx"))?
+                .send(request).await?;
             
-            index += 1;
         } 
         
         
         Ok(())
     }
     
-     fn subscribe_new_connection(&mut self) -> mpsc::Receiver<Message> {
+     pub fn subscribe_new_connection(&mut self) -> mpsc::Receiver<Message> {
         let (request_tx, request_rx) = mpsc::channel::<Message>(50);
         self.request_txs.push(request_tx);
         

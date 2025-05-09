@@ -1,5 +1,5 @@
+mod peer_connection;
 mod torrent_client;
-mod server_connection;
 mod quic_p2p_sender;
 mod turn_fallback;
 mod connection;
@@ -10,9 +10,9 @@ mod message;
 
 use std::collections::HashMap;
 use std::io::Write;
-use torrent_client::TorrentClient;
+use peer_connection::PeerConnection;
 use crate::file_handler::InfoHash;
-use crate::server_connection::ServerConnection;
+use crate::torrent_client::TorrentClient;
 
 
 
@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider()).expect("cannot install default provider");
 
-    let mut server_conn = ServerConnection::new().await?;
+    let mut torrent_client = TorrentClient::new().await?;
 
 
     let mut input = String::new();
@@ -34,9 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "s" => {
             println!("Seeding");
 
-            let mut server_clone = server_conn.clone();
+            let mut client_clone = torrent_client.clone();
             let seeding = tokio::spawn( async move {
-                TorrentClient::seeding(&mut server_clone).await.unwrap();
+                client_clone.seeding().await.unwrap();
             });
 
             seeding.await.expect("seeding broken");
@@ -45,7 +45,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             input.clear();
             println!("Requesting");
             //todo will need have a requesting process like seeding above
-            let mut torrent_client = server_conn.register_new_client().await?;
             
             let files = torrent_client.get_server_files().await?;
             

@@ -7,8 +7,8 @@ use std::time::Duration;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Connection, Endpoint, TokioRuntime};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-use crate::server_connection::ServerConnection;
 use crate::torrent_client::TorrentClient;
+use crate::peer_connection::PeerConnection;
 use crate::connection::connection::{PeerId, CertMessage, Cert};
 use crate::message::Message;
 use tokio::{net::UdpSocket as TokioUdpSocket, sync::mpsc};
@@ -33,7 +33,7 @@ impl QuicP2PConn {
     pub(crate) async fn init_for_certificate(
         self,
         self_addr: PeerId,
-        server: ServerConnection,
+        server: TorrentClient,
     ) {
         let mut server_connection = server.client.clone();
 
@@ -47,7 +47,7 @@ impl QuicP2PConn {
     pub(crate) async fn create_quic_server(
         socket: TokioUdpSocket,
         peer_id: PeerId,
-        server: ServerConnection,
+        server: TorrentClient,
         cert_ip: String,
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
 
@@ -103,7 +103,7 @@ impl QuicP2PConn {
     pub (crate) async fn create_quic_client (
         socket: TokioUdpSocket,
         self_addr: PeerId,
-        server: ServerConnection,
+        server: TorrentClient,
     ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
         let mut server_connection = server.client.clone();
 
@@ -284,6 +284,7 @@ impl QuicP2PConn {
                     eprintln!("{:?}", res);
                 }
             } else {
+                println!("connection closed");
                 break;
             }
         }

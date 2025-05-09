@@ -3,8 +3,9 @@ import "google/protobuf/empty.proto";
 package connection;
 
 service Connector {
-    rpc send_file_request (FileMessage) returns (PeerList);
-    rpc seed (ClientId) returns (PeerId);
+    rpc get_file_peer_list (InfoHash) returns (PeerList);
+    rpc send_file_request (FullId) returns (google.protobuf.Empty);
+    rpc seed (PeerId) returns (PeerId);
     rpc await_hole_punch_trigger (PeerId) returns (google.protobuf.Empty);
     rpc init_punch (PeerId) returns (google.protobuf.Empty);
     rpc advertise (FileMessage) returns(ClientId);

@@ -1,0 +1,302 @@
+use std::any::Any;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{ErrorKind};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
+use stunclient::StunClient;
+use tokio::{net::UdpSocket, sync::mpsc};
+use std::sync::Arc;
+use std::time::Duration;
+use tonic::{Request, Response};
+use crate::quic_p2p_sender::QuicP2PConn;
+use crate::turn_fallback::TurnFallback;
+use crate::torrent_client::TorrentClient;
+use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId, InfoHash as ConnHash, FileList};
+use tokio_util::sync::CancellationToken;
+use local_ip_address::local_ip;
+use rcgen::Error;
+use tokio::sync::Mutex;
+use tokio::time::{sleep, timeout};
+use crate::file_handler;
+use crate::file_handler::{get_info_hashes, InfoHash};
+use crate::file_assembler::*;
+use crate::message::Message;
+
+#[derive(Debug)]
+pub struct PeerConnection {
+    pub(crate) server: TorrentClient,
+    pub(crate) pub_socket: Option<UdpSocket>,
+    pub(crate) priv_socket: Option<UdpSocket>,
+    pub(crate) self_addr: PeerId,
+    // peer_conns: Vec<PeerConnection>,
+}
+
+impl PeerConnection {
+  
+    async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
+
+        //todo maybe don't take this here
+        let socket_arc = Arc::new(self.pub_socket.take().unwrap());
+        let socket_clone = socket_arc.clone();
+        let cancel_token = CancellationToken::new();
+        let token_clone = cancel_token.clone();
+
+        let punch_string = b"HELPFUL_SERF";
+
+        println!("Starting Send to peer ip: {}, port: {}", peer_addr.ip(), peer_addr.port());
+
+        let send_task = tokio::spawn(async move {
+            for i in 0..50 {
+                let res = socket_arc.send_to(punch_string, peer_addr).await;
+
+                if res.is_err() {
+                    println!("Send Failed: {}", res.err().unwrap());
+                }
+
+                if token_clone.is_cancelled() {
+                    println!("Send Cancelled");
+                    return Ok(socket_arc);
+                }
+
+                sleep(Duration::from_millis(10)).await;
+            }
+            Err(Box::<dyn std::error::Error + Send + Sync>::from("send task finished without succeeding"))
+        });
+
+
+        let read_task = tokio::spawn( async move {
+            let mut recv_buf = [0u8; 1024];
+            
+            let result = timeout(Duration::from_secs(5), async {
+                loop {
+                    match socket_clone.recv_from(&mut recv_buf).await {
+                        Ok((n, src)) => {
+                            println!("Received from {}: {:?}", src, &recv_buf[..n]);
+                            if &recv_buf[..n] == punch_string {
+                                // println!("Punched SUCCESS {}", src);
+
+                                cancel_token.cancel();
+                                drop(socket_clone);
+                                return Ok(());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Recv error: {}", e);
+                            return Err(Box::<dyn std::error::Error + Send + Sync>::from(e));
+                        },
+                    }
+                }
+            }).await;
+            
+            match result {
+                Ok(res) => Ok(res),
+                Err(e) => Err(e),
+            } 
+        });
+
+        let socket_arc = match send_task.await {
+            Ok(Ok(socket)) => socket,
+            Ok(Err(e)) => return Err(e),
+            Err(join_err) => return Err(Box::new(join_err)),
+        };
+
+        let read_res = read_task.await?;
+        match read_res {
+            Ok(_) => {
+                let socket = Arc::try_unwrap(socket_arc).unwrap();
+                println!("Punch Success: {:?}", socket);
+                Ok(socket)
+            }
+            _ => { Err(Box::new(std::io::Error::new(ErrorKind::TimedOut, "hole punch timed out"))) }
+        }
+
+    }
+
+    
+    pub async fn seeder_connection(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
+        let peer_id = res.into_inner();
+        let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+        let pub_port = peer_id.port as u16;
+        let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
+
+        // create a PeerConnection and get the receiver
+
+        println!("peer to send {:?}", peer_id);
+
+        //1. try connection over local NAT
+        if self.self_addr.ipaddr == peer_id.ipaddr {
+            //start quick server
+            let socket = self.priv_socket.take().unwrap();
+            let mut p2p_sender = QuicP2PConn::create_quic_server(
+                socket, 
+                peer_id, 
+                self.server.clone(), 
+                Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
+            ).await?;
+            // println!("P2P quic endpoint created successfully");
+            let res = p2p_sender.quic_listener(self.server.file_hashes.clone()).await;
+            match res {
+                Ok(()) => {
+                    println!("SEEDER: Quic connection within LAN success!");
+                    // conn_success = true
+                    return Ok(());
+                },
+                Err(e) => {
+                    println!("SEEDER: LAN based quic connection failed\n {:?}", e);
+                }
+            }
+        }
+        
+        //2. try connection across NAT
+        {
+            let timeout_duration = Duration::from_secs(4);
+            let res = timeout(
+                timeout_duration, 
+                self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
+            ).await?;
+            
+            match res {
+                Ok(_) => {
+                    if let Ok(socket) = self.hole_punch(peer_addr).await {
+                        // println!("Returned value {:?}", socket);
+                        //start quick server
+                        
+                        
+                        let mut p2p_sender = QuicP2PConn::create_quic_server(
+                            socket,
+                            peer_id,
+                            self.server.clone(),
+                            Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
+                        ).await?;
+                        // println!("SEEDER: P2P quic endpoint across NAT created successfully");
+                        match p2p_sender.quic_listener(self.server.file_hashes.clone()).await {
+                            Ok(()) => {
+                                println!("SEEDER: Quic connection across NAT successful!");
+                                return Ok(())
+                            },
+                            Err(e) => {
+                                println!("SEEDER: Connection across NAT after hole punch failed");
+                            }
+                        }
+                    } 
+                },
+                Err(e) => {
+                    println!("SEEDER: Failed to receive hole punch trigger");
+                }
+            }
+        }
+            
+        // Fall back connection on TURN
+        {
+      
+            // TURN for sending here
+            // let client_id = self.server.uid.clone();
+            // 
+            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx).await?;
+            // 
+            // 
+            // // TODO probably develop a better way to do the actual send over TURN...
+            // let response = self.server.client.get_client_id(peer_id).await?;
+            // let target = response.into_inner();
+            // let buf = "data sent over TURN".as_bytes().to_vec();
+            // 
+            // tokio::time::sleep(Duration::from_millis(1000)).await;
+            // fallback.send_to(target, buf).await?;
+            // println!("SEEDER fallback to TURN")
+        }
+
+        Ok(())
+    }
+
+    
+
+    ///Used when client is requesting a file
+    pub async fn requester_connection(&mut self, peer_id: PeerId, conn_tx: mpsc::Sender<Message>, mut request_rx:  mpsc::Receiver<Message> ) -> Result<(), Box<dyn std::error::Error>> {
+        
+        //init the map so cert can be retrieved
+        let mut server_connection = self.server.client.clone();
+        server_connection.init_cert_sender(self.self_addr).await?;
+
+        let conn_rx = Arc::new(Mutex::new(request_rx));
+        
+
+        if self.self_addr.ipaddr == peer_id.ipaddr {
+            let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
+            let port = peer_id.priv_port as u16;
+            let lan_peer_addr = SocketAddr::from((ip_addr, port));
+            let priv_socket = self.priv_socket.take().unwrap();
+
+            let mut p2p_conn = QuicP2PConn::create_quic_client(
+                priv_socket,
+                self.self_addr,
+                self.server.clone(),
+            ).await?;
+            
+
+            match p2p_conn.connect_to_peer_server(lan_peer_addr, conn_tx.clone(), conn_rx.clone()).await {
+                Ok(()) => {
+                    println!("REQUESTER: successful connection within LAN");
+                    return Ok(())
+                },
+                Err(_) => {
+                    println!("REQUESTER: connect over LAN failed");
+                }
+            }
+        }
+
+        {    
+            let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+            let port = peer_id.port as u16;
+            let peer_addr = SocketAddr::from((ip_addr, port));
+
+            //add pause to give other peer time to wait on notify handle
+            sleep(Duration::from_millis(1000)).await;
+            
+            //initiate hole punch routine with other peer
+            server_connection.init_punch(peer_id).await?;
+            
+            sleep(Duration::from_millis(250)).await;
+            
+            if let Ok(socket) = self.hole_punch(peer_addr).await {
+                let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+                let port = peer_id.port as u16;
+                let peer_addr = SocketAddr::from((ip_addr, port));
+
+                let mut p2p_conn = QuicP2PConn::create_quic_client(
+                    socket,
+                    self.self_addr,
+                    self.server.clone(),
+                ).await?;
+                
+                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx, conn_rx).await {
+                    Ok(()) => {
+                        println!("REQUESTER: successful connection across NAT");
+                        return Ok(())
+                    },
+                    Err(_) => {
+                        println!("REQUESTER: connect across NAT failed");
+                    }
+                }
+            } 
+        }
+            
+        
+        {
+            // TURN for receiving here
+            // let client_id = self.server.uid.clone();
+            // 
+            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx.clone()).await?;
+            // 
+            // // TODO remove... just needed to have this to keep the program open long enough to receive data
+            // tokio::time::sleep(Duration::from_secs(5)).await;
+            // 
+            // println!("REQUESTER: fallback to TURN succeeded");
+        }
+
+        Ok(())
+    }
+
+
+    
+    
+}
