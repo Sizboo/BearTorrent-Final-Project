@@ -85,7 +85,7 @@ impl TorrentClient {
         let priv_addr= SocketAddrV4::new(priv_ipaddr, 0); 
         let priv_socket = UdpSocket::bind(priv_addr).await?;
 
-        let priv_port = priv_addr.port();
+        let priv_port = priv_socket.local_addr()?.port();
         
         println!("My private IP {:?}", priv_ipaddr);
         println!("My private port is {}", priv_port);
