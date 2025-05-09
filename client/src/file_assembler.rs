@@ -11,15 +11,6 @@ use crate::peer_connection::PeerConnection;
 /// this represents a connection between 2 peers
 #[derive(Debug)]
 pub struct FileAssembler {
-    /// the sender we will use to send to a PieceAssembler
-    // snd_tx: mpsc::Sender<Message>,
-    /// the receiver we will let a PieceAssembler borrow so we can send to it
-    // snd_rx: mpsc::Receiver<Message>,
-    
-    // torrent_client: &'a mut TorrentClient,
-    // 
-    // peer_list: Vec<PeerId>,
-    
     ///the sender used for LAN/P2P/QUIC to send data from
     conn_tx: mpsc::Sender<Message>, 
     /// sender used to send file requests across a connection
@@ -56,7 +47,7 @@ impl FileAssembler {
         let info_hash = file_handler::InfoHash::server_to_client_hash(file_hash.clone());
         let hash = info_hash.get_hashed_info_hash();
 
-        for i in 0..num_connections {
+        for i in 0..info_hash.pieces.len() {
 
             let request = Message::Request {
                 index : 0,
