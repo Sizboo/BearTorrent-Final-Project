@@ -232,7 +232,7 @@ impl TorrentClient {
                     return Ok(());
                 },
                 Err(e) => {
-                    println!("SEEDER: LAN based quic connection failed");
+                    println!("SEEDER: LAN based quic connection failed\n {:?}", e);
                 }
             }
         }
