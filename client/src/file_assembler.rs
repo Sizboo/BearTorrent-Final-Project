@@ -59,14 +59,11 @@ impl FileAssembler {
 
         
         let mut index = 0;
-        for piece in file_hash.pieces {
-            let conn_tx = assembler.conn_tx.clone();
-            let conn_rx = assembler.subscribe_new_connection();
+        let conn_tx = assembler.conn_tx.clone();
+        let conn_rx = assembler.subscribe_new_connection();
+        torrent_client.requester_connection(peer, conn_tx, conn_rx).await?;
 
-            
-            
-            torrent_client.requester_connection(peer, conn_tx, conn_rx).await?;
-            
+        for piece in file_hash.pieces {
             
             let request = Message::Request {
                 index,
