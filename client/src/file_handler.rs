@@ -245,7 +245,7 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
         }
         // .info existed before, so we can read from it
         false => {
-            let pieces= vec![0u8;info_hash.piece_length as usize];
+            let pieces= vec![0u8;info_hash.pieces.len()];
             info_file.write_all(&pieces).unwrap();
 
             Status{
@@ -260,6 +260,7 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
 pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
     match is_file_complete(info_hash.clone()) {
         true => {
+            println!("file is complete!");
             // Get both cached files
             let part_file = get_part_file(info_hash.name.clone());
             let (info_file, _) = get_info_file(info_hash.name.clone());

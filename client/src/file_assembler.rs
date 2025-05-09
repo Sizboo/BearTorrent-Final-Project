@@ -24,7 +24,10 @@ impl FileAssembler {
         };
 
         tokio::spawn(async move {
-            Self::reassemble_loop(conn_rx, file_handler).await
+            let res = Self::reassemble_loop(conn_rx, file_handler).await;
+            if res.is_err() {
+                eprintln!("{:?}", res);
+            }
         });
 
         assembler
