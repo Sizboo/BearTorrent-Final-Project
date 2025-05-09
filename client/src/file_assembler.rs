@@ -62,18 +62,19 @@ impl FileAssembler {
         let conn_tx = assembler.conn_tx.clone();
         let conn_rx = assembler.subscribe_new_connection();
         torrent_client.requester_connection(peer, conn_tx, conn_rx).await?;
+        
+        //todo this must be fixed with iterating through peerlist too
+        let request_tx = assembler.request_txs.pop().unwrap();
 
         for piece in file_hash.pieces {
-            
+
             let request = Message::Request {
                 index,
                 begin: file_hash.piece_length as u32 * index,
                 length: file_hash.piece_length as u32,
                 hash,
             };
-           
-            //todo this must be fixed with iterating through peerlist too
-            let request_tx = assembler.request_txs.pop().unwrap();
+
             
             println!("Sending piece request {}", index);
             request_tx.send(request).await?;
