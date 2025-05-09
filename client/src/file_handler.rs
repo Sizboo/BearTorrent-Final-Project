@@ -260,13 +260,12 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
 pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
     match is_file_complete(info_hash.clone()) {
         true => {
-            println!("file is complete!");
             // Get both cached files
             let part_file = get_part_file(info_hash.name.clone());
             let (info_file, _) = get_info_file(info_hash.name.clone());
 
             // New target file path
-            let new_file_name = format!("resources/files/{}", info_hash.name);
+            let new_file_name = format!("../files/{}", info_hash.name);
 
             // Check if the file already exists to prevent overwriting
             if exists(Path::new(&new_file_name))?{
