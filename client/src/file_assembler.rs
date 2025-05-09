@@ -36,7 +36,7 @@ impl FileAssembler {
         };
         
         tokio::spawn(async move {
-            Self::reassemble_loop(conn_rx, file_handler)    
+            Self::reassemble_loop(conn_rx, file_handler).await
         });
         
         assembler 
@@ -84,7 +84,8 @@ impl FileAssembler {
         request_rx
     }
     
-    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: file_handler::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: file_handler::InfoHash) 
+        -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let num_pieces = info_hash.pieces.len();
         
         for _  in 0.. num_pieces {
@@ -92,7 +93,7 @@ impl FileAssembler {
            
            let (index, piece) = match msg {
                Message::Piece { index, piece  } => (index, piece),
-               _ => Err(Box::<dyn std::error::Error>::from("wrong message type"))?, 
+               _ => Err(Box::<dyn std::error::Error + Send + Sync>::from("wrong message type"))?, 
            };
 
            println!("Received Piece: {}", index);
