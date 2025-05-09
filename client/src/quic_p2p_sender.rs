@@ -174,7 +174,7 @@ impl QuicP2PConn {
         println!("Seeder accepted bi stream!");
         
         loop {
-            let mut req_buf : [u8; 32] = [0; 32];
+            let mut req_buf : [u8; 33] = [0; 33];
             recv.read_exact(&mut req_buf).await?;
             println!("Client received req {:?}", req_buf);
 
