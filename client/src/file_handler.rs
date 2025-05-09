@@ -167,7 +167,7 @@ impl connection::InfoHash {
 // Checks if a file exists, if it doesn't then it is created.
 // Returns the PathBuf to this file
 fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::Result<(PathBuf, bool)> {
-    let temp_file_name = format!("../{}/{}{}", src, file_name, extension);
+    let temp_file_name = format!("resources/{}/{}{}", src, file_name, extension);
     println!("Temp file name: {}", temp_file_name);
     let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
         Ok(true) => (PathBuf::from(temp_file_name), true),
@@ -198,8 +198,12 @@ fn get_file(file_name: String) -> PathBuf {
 
 // Create the files directory if it doesn't exist
 fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
-    let dir = match create_dir_all("../files"){
-        Ok(dir) => PathBuf::from("../files"),
+    let dir = match exists(Path::new("resources/files")) {
+        Ok(true) => PathBuf::from("resources/files"),
+        Ok(false) => {
+            File::create("resources/files")?;
+            PathBuf::from("resources/files")
+        }
         Err(e) => return Err(e),
     };
     Ok(dir)
@@ -207,11 +211,15 @@ fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
 
 // Create the cache directory for .part and .info files if it doesn't exist
 fn get_client_cache_dir() -> std::io::Result<PathBuf> {
-    let cache = match create_dir_all("../cache") {
-        Ok(c) => PathBuf::from("../cache"),
+    let dir = match exists(Path::new("resources/cache")) {
+        Ok(true) => PathBuf::from("resources/cache"),
+        Ok(false) => {
+            File::create("resources/cache")?;
+            PathBuf::from("resources/cache")
+        }
         Err(e) => return Err(e),
     };
-    Ok(cache)
+    Ok(dir)
 }
 
 // Checks the client for resources directory containing cache and files.
@@ -267,7 +275,7 @@ pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn 
             let (info_file, _) = get_info_file(info_hash.name.clone());
 
             // New target file path
-            let new_file_name = format!("../files/{}", info_hash.name);
+            let new_file_name = format!("resources/files/{}", info_hash.name);
 
             // Check if the file already exists to prevent overwriting
             if exists(Path::new(&new_file_name))?{
