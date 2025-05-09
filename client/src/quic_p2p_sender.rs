@@ -168,7 +168,7 @@ impl QuicP2PConn {
         conn: Connection,
         file_map: &'a HashMap<[u8; 20], InfoHash>
     ) -> Result<(), Box<dyn std::error::Error>> {
-
+        println!("Seeder accepted quic connection");
         let (mut send, mut recv) = conn.accept_bi().await?;
         println!("Seeder accepted bi stream!");
         
