@@ -173,7 +173,7 @@ impl TorrentClient {
         let num_connections = min(peer_list.len(), file_hash.pieces.len());
         let mut assembler = FileAssembler::new(InfoHash::server_to_client_hash(file_hash.clone())).await;
        
-        let mut connection_handles = Vec::new()
+        let mut connection_handles = Vec::new();
         //spawn the correct number of connections
         for i in 0..num_connections {
             let mut peer_connection = self.register_new_connection().await?;
