@@ -168,6 +168,7 @@ impl connection::InfoHash {
 // Returns the PathBuf to this file
 fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::Result<(PathBuf, bool)> {
     let temp_file_name = format!("resources/{}/{}{}", src, file_name, extension);
+    println!("Temp file name: {}", temp_file_name);
     let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
         Ok(true) => (PathBuf::from(temp_file_name), true),
         Ok(false) => {
@@ -197,8 +198,8 @@ fn get_file(file_name: String) -> PathBuf {
 
 // Create the files directory if it doesn't exist
 fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
-    let dir = match create_dir_all("resources/files"){
-        Ok(dir) => PathBuf::from("resources/files"),
+    let dir = match create_dir_all("../files"){
+        Ok(dir) => PathBuf::from("../files"),
         Err(e) => return Err(e),
     };
     Ok(dir)
@@ -206,8 +207,8 @@ fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
 
 // Create the cache directory for .part and .info files if it doesn't exist
 fn get_client_cache_dir() -> std::io::Result<PathBuf> {
-    let cache = match create_dir_all("resources/cache") {
-        Ok(c) => PathBuf::from("resources/cache"),
+    let cache = match create_dir_all("../cache") {
+        Ok(c) => PathBuf::from("../cache"),
         Err(e) => return Err(e),
     };
     Ok(cache)
@@ -261,6 +262,7 @@ pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn 
     match is_file_complete(info_hash.clone()) {
         true => {
             // Get both cached files
+            println!("Printing: {:?}", info_hash.name.clone());
             let part_file = get_part_file(info_hash.name.clone());
             let (info_file, _) = get_info_file(info_hash.name.clone());
 
