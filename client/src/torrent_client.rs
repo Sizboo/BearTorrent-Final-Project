@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
@@ -14,6 +15,7 @@ use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, Ful
 use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
 use rcgen::Error;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 use crate::file_handler;
 use crate::file_handler::{get_info_hashes, InfoHash};
@@ -222,7 +224,7 @@ impl TorrentClient {
                 Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
             ).await?;
             // println!("P2P quic endpoint created successfully");
-            let res = p2p_sender.quic_listener(&mut self.server.file_hashes).await;
+            let res = p2p_sender.quic_listener(self.server.file_hashes.clone()).await;
             match res {
                 Ok(()) => {
                     println!("SEEDER: Quic connection within LAN success!");
@@ -257,7 +259,7 @@ impl TorrentClient {
                             Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
                         ).await?;
                         // println!("SEEDER: P2P quic endpoint across NAT created successfully");
-                        match p2p_sender.quic_listener(&mut self.server.file_hashes).await {
+                        match p2p_sender.quic_listener(self.server.file_hashes.clone()).await {
                             Ok(()) => {
                                 println!("SEEDER: Quic connection across NAT successful!");
                                 return Ok(())
@@ -325,6 +327,7 @@ impl TorrentClient {
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
 
+        let conn_rx = Arc::new(Mutex::new(conn_rx));
 
         if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
@@ -337,7 +340,9 @@ impl TorrentClient {
                 self.self_addr,
                 self.server.clone(),
             ).await?;
-            match p2p_conn.connect_to_peer_server(lan_peer_addr, conn_tx.clone(), &mut conn_rx).await {
+            
+
+            match p2p_conn.connect_to_peer_server(lan_peer_addr, conn_tx.clone(), conn_rx.clone()).await {
                 Ok(()) => {
                     println!("REQUESTER: successful connection within LAN");
                     return Ok(())
@@ -372,7 +377,7 @@ impl TorrentClient {
                     self.server.clone(),
                 ).await?;
                 
-                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx, &mut conn_rx).await {
+                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx, conn_rx).await {
                     Ok(()) => {
                         println!("REQUESTER: successful connection across NAT");
                         return Ok(())
@@ -422,7 +427,7 @@ impl TorrentClient {
     }
     
     async fn advertise_all(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let my_hashes = self.server.file_hashes.clone().into_values();
+        let my_hashes = self.server.file_hashes.read().await.clone().into_values();
 
         for hash in my_hashes {
            self.advertise(hash.get_server_info_hash()).await?; 

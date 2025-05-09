@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddrV4, ToSocketAddrs};
+use std::sync::Arc;
 use local_ip_address::local_ip;
 use stunclient::StunClient;
 use tokio::net::UdpSocket;
+use tokio::sync::RwLock;
 use tonic::transport::{Channel, ClientTlsConfig};
 use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FullId, PeerId};
 use crate::file_handler::{get_info_hashes, InfoHash};
@@ -14,7 +16,7 @@ pub struct ServerConnection {
     pub(crate) client: connector_client::ConnectorClient<Channel>,
     pub(crate) turn: turn_client::TurnClient<Channel>,
     pub(crate) uid: ClientId,
-    pub(crate) file_hashes: HashMap<[u8;20], InfoHash>
+    pub(crate) file_hashes: Arc<RwLock<HashMap<[u8;20], InfoHash>>>
 }
 
 const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
@@ -46,7 +48,7 @@ impl ServerConnection {
                 client,
                 turn,
                 uid,
-                file_hashes,
+                file_hashes: Arc::new(RwLock::new(file_hashes)),
             }
         )
     }

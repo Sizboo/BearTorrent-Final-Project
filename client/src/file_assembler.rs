@@ -63,7 +63,8 @@ impl FileAssembler {
             let conn_tx = assembler.conn_tx.clone();
             let conn_rx = assembler.subscribe_new_connection();
 
-
+            
+            
             torrent_client.requester_connection(peer, conn_tx, conn_rx).await?;
             
             
@@ -77,6 +78,7 @@ impl FileAssembler {
             //todo this must be fixed with iterating through peerlist too
             let request_tx = assembler.request_txs.pop().unwrap();
             
+            println!("Sending piece request {}", index);
             request_tx.send(request).await?;
             
             index += 1;

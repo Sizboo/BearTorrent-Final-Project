@@ -14,6 +14,7 @@ use crate::message::Message;
 use tokio::{net::UdpSocket as TokioUdpSocket, sync::mpsc};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::timeout;
 use tonic::Request;
 use crate::file_handler::{read_piece_from_file, InfoHash};
@@ -138,9 +139,9 @@ impl QuicP2PConn {
         })
     }
     
-    pub(crate) async fn quic_listener<'a>(
+    pub(crate) async fn quic_listener(
         &mut self,
-        file_map: &'a HashMap<[u8; 20], InfoHash> 
+        file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>
     ) -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
         
@@ -152,8 +153,13 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-                
-                self.send_data(conn,file_map).await?;
+               
+                tokio::spawn(async move{
+                    let res = QuicP2PConn::send_data(conn, file_map).await;
+                    if res.is_err() {
+                        eprintln!("Failed to send data!");
+                    }
+                });
                 
                 Ok(())
             },
@@ -163,10 +169,9 @@ impl QuicP2PConn {
         }
     }
     
-    async fn send_data<'a>(
-        &mut self,
+    async fn send_data(
         conn: Connection,
-        file_map: &'a HashMap<[u8; 20], InfoHash>
+        file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("Seeder accepted quic connection");
         let (mut send, mut recv) = conn.accept_bi().await?;
@@ -185,7 +190,7 @@ impl QuicP2PConn {
         }
         let (index, begin, length, hash)= request.ok_or("failed to decode request")?;
         
-        let info_hash = file_map.get(&hash).cloned().ok_or("seeder missing file info")?; 
+        let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?; 
 
 
         let piece = read_piece_from_file(info_hash, index)?;
@@ -203,11 +208,11 @@ impl QuicP2PConn {
         
     }
 
-    pub(crate) async fn connect_to_peer_server<'a>(
+    pub(crate) async fn connect_to_peer_server(
         &mut self,
         peer_addr: SocketAddr,
         conn_tx: Sender<Message>,
-        conn_rx: &'a mut Receiver<Message>
+        conn_rx: Arc<Mutex<Receiver<Message>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
 
         // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
@@ -217,8 +222,12 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-                self.recv_data(conn, conn_tx, conn_rx).await?;
-
+                tokio::spawn(async move {
+                    let res = QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await;
+                    if res.is_err() {
+                        eprintln!("{:?}", res);
+                    }
+                });
                 Ok(()) 
             }
             Err(e) => {
@@ -229,17 +238,16 @@ impl QuicP2PConn {
         
     }
     
-    async fn recv_data<'a>(
-        &mut self,
+    async fn recv_data(
         conn: Connection,
         conn_tx: Sender<Message>,
-        conn_rx: &'a mut Receiver<Message>
+        conn_rx: Arc<Mutex<Receiver<Message>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         
         let (mut send, mut recv) = conn.open_bi().await?;
         println!("requester opened bi stream!");
         
-        if let Some(msg) = conn_rx.recv().await {
+        if let Some(msg) = conn_rx.lock().await.recv().await {
             
             println!("Send message to peer");
             send.write_all(&msg.encode()).await?;
