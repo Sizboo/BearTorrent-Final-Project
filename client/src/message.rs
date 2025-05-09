@@ -82,7 +82,7 @@ impl Message{
             }
             7 => {
                 let index = u32::from_be_bytes(buf[5..9].try_into().unwrap());
-                let piece = buf[9..(4 + length)].to_vec(); // TODO double check this is right
+                let piece = buf[9..].to_vec(); // TODO double check this is right
                 Some(Message::Piece{ index,  piece })
             }
             8 => {
