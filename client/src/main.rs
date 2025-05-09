@@ -8,8 +8,9 @@ mod piece_assembler;
 mod file_assembler;
 mod message;
 
+use std::collections::HashMap;
 use torrent_client::TorrentClient;
-
+use crate::file_handler::InfoHash;
 use crate::server_connection::ServerConnection;
 
 
@@ -43,6 +44,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Requesting");
             //todo will need have a requesting process like seeding above
             let mut torrent_client = server_conn.register_new_client().await?;
+            
+            let files = torrent_client.get_server_files().await?;
+            
+            let mut file_selection: HashMap<u16, InfoHash> = HashMap::new();
+            
+            let mut i :u16 = 0;
+            
+            for file in files {
+                println!("Option: {} -> File: {}", i, file.name);
+                file_selection.insert(i, file);
+                i += 1;
+            }
+            
+            println!("\n\n type a number for your selection:");
+
+            std::io::stdin().read_line(&mut input)?;
+            let command = input.trim().parse::<u16>().expect("invalid number");
+            
+            let file_requested = file_selection.get(&command).unwrap();
+            println!("You Requested: {}", file_requested.name);
+            
+            torrent_client.file_request(InfoHash::get_server_info_hash(file_requested)).await?;
+            
+            
 
         }
         _ => {

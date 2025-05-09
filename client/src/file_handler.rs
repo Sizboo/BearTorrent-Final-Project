@@ -8,10 +8,10 @@ use crate::connection::*;
 
 #[derive(Debug, Clone)]
 pub struct InfoHash{
-    name: String, // Name of the file
+    pub(crate) name: String, // Name of the file
     file_length: u64, // Size of the file in bytes
-    piece_length: u64, // Number of bytes per piece
-    pieces: Vec<[u8;20]>, // hash list of the pieces
+    piece_length: u32, // Number of bytes per piece
+    pub(crate) pieces: Vec<[u8;20]>, // hash list of the pieces
 }
 
 // Represents the status of the piece download
@@ -88,7 +88,7 @@ impl InfoHash {
     }
 
     // Determines the length of the pieces based on the length of the file
-    fn get_piece_length(length: u64) -> u64 {
+    fn get_piece_length(length: u64) -> u32 {
         match length {
             0..=67_108_864 => 65_536,             // ≤ 64 MiB → 64 KiB
             67_108_865..=536_870_912 => 262_144,  // ≤ 512 MiB → 256 KiB
@@ -98,7 +98,7 @@ impl InfoHash {
     }
 
     // Generate the 20-byte SHA1 hash of the InfoHash
-    pub fn get_hashed_info_hash(&self) -> [u8; 20] {
+    pub  fn get_hashed_info_hash(&self) -> [u8; 20] {
         // Hash all members of the info hash
         let mut hasher = Sha1::new();
         hasher.update(self.file_length.to_be_bytes());
@@ -123,7 +123,7 @@ impl InfoHash {
         connection::InfoHash {
             name: self.name.clone(),
             file_length: self.file_length.clone(),
-            piece_length: self.piece_length.clone(),
+            piece_length: self.piece_length.clone() as u64,
             pieces,
         }
     }
@@ -135,7 +135,7 @@ impl InfoHash {
         InfoHash {
             name: server_info_hash.name,
             file_length: server_info_hash.file_length,
-            piece_length: server_info_hash.piece_length,
+            piece_length: server_info_hash.piece_length as u32,
             pieces,
         }
     }
@@ -214,7 +214,7 @@ fn get_info_status(file_name: String, num_pieces: usize) -> Status {
 }
 
 // Create the cache directory for .part and .info files if it doesn't exist
-fn get_client_cache_dir() -> std::io::Result<(PathBuf)> {
+fn get_client_cache_dir() -> std::io::Result<PathBuf> {
     let cache = match create_dir_all("resources/cache") {
         Ok(c) => PathBuf::from("resources/cache"),
         Err(e) => return Err(e),
@@ -234,7 +234,7 @@ fn verify_client_dir_setup() -> () {
 
 
 // This function writes a piece to a .part file
-pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_index: u64) -> std::io::Result<()> {
+pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_index: u32) -> std::io::Result<()> {
     // Verify cache directory exists
     let dir = get_client_cache_dir()?;
 
@@ -246,7 +246,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 
     // Seek to the index we need to write to, write the piece, flush the buffer
     // TODO check that seeking ahead in an empty file doesn't cause issues
-    part_file.seek(SeekFrom::Start((piece_index) * info_hash.piece_length ))?;
+    part_file.seek(SeekFrom::Start(((piece_index) * info_hash.piece_length) as u64))?;
     part_file.write_all(&piece)?;
     part_file.flush()?;
 
@@ -260,7 +260,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
     // Get the .info file and seek to the byte that represents this piece, set it to true
     let (info_file_path, is_new_info) = get_info_file(info_hash.name);
     let mut info_file = OpenOptions::new().write(true).open(&info_file_path)?;
-    info_file.seek(SeekFrom::Start(piece_index))?;
+    info_file.seek(SeekFrom::Start(piece_index as u64))?;
     info_file.write(&[1u8])?;
     info_file.flush()?;
 
@@ -268,13 +268,13 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 
 }
 
-pub(crate) fn read_piece_from_file(info_hash: InfoHash, piece_index: u64) -> std::io::Result<Vec<u8>>{
+pub(crate) fn read_piece_from_file(info_hash: InfoHash, piece_index: u32) -> std::io::Result<Vec<u8>>{
     let file_path = get_file(info_hash.name.clone());
     let mut file = OpenOptions::new().read(true).open(&file_path)?;
     let num_pieces = info_hash.piece_length as usize;
     let mut buf= vec![0u8;num_pieces];
     
-    file.seek(SeekFrom::Start(info_hash.piece_length * piece_index))?;
+    file.seek(SeekFrom::Start((info_hash.piece_length * piece_index) as u64))?;
     file.read_exact(&mut buf)?;
     Ok(buf)
 }

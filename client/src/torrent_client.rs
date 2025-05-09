@@ -297,29 +297,34 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&self, client_id: ClientId , file_hash: ConnHash) -> Result<PeerList, Box<dyn std::error::Error>> {
+    pub async fn file_request(&mut self, file_hash: ConnHash) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.server.client.clone();
         
         
         let request = Request::new(FileMessage {
-            id: Some(client_id),
-            info_hash: Some(file_hash),
+            id: Some(self.server.uid.clone()),
+            info_hash: Some(file_hash.clone()),
         });
         
-        let resp = client.send_file_request(request).await?;
+        let peer_list = client.send_file_request(request).await?.into_inner().list;
         
-        Ok(resp.into_inner())
+        
+        let res = FileAssembler::assemble(self, peer_list, file_hash).await;
+        
+        if res.is_err() {
+            eprintln!("Failed to assemble FileAssembler");
+        }
+         
+        Ok(())
     }
 
     ///Used when client is requesting a file
-    pub async fn requester_connection(&mut self, peer_id: PeerId, assembler: &mut FileAssembler) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn requester_connection(&mut self, peer_id: PeerId, conn_tx: mpsc::Sender<Message>, mut conn_rx:  mpsc::Receiver<Message> ) -> Result<(), Box<dyn std::error::Error>> {
         
         //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
 
-        let conn_tx = assembler.get_connection_send_handle();
-        let mut conn_rx = assembler.subscribe_new_connection();
 
         if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);

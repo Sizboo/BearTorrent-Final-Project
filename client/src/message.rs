@@ -15,10 +15,10 @@ pub enum Message{
     } = 6,
 
     // Variable length message containing a block of the piece.
-    Block{
+    Piece{
         index: u32, // Zero-based index of the piece
-        begin: u32, // The zero-based byte offset within the piece
-        block: Vec<u8> // The block of data, which is a subset of the piece specified by the index
+        // begin: u32, // The zero-based byte offset within the piece
+        piece: Vec<u8> // The block of data, which is a subset of the piece specified by the index
     } = 7,
 
     // Fixed length message to cancel a block request. Payload is identical to the request message.
@@ -44,12 +44,11 @@ impl Message{
                 buf.extend_from_slice(&length.to_be_bytes());
                 buf.extend_from_slice(hash);
             }
-            Message::Block{ index, begin, block } => {
-                buf.extend_from_slice((9 + block.len() as u32).to_be_bytes().as_ref());
+            Message::Piece{ index,  piece } => {
+                buf.extend_from_slice((5 + piece.len() as u32).to_be_bytes().as_ref());
                 buf.push(7);
                 buf.extend_from_slice(&index.to_be_bytes());
-                buf.extend_from_slice(&begin.to_be_bytes());
-                buf.extend_from_slice(block);
+                buf.extend_from_slice(piece);
             }
             Message::Cancel{ index, begin, length } => {
                 buf.extend_from_slice(&13u32.to_be_bytes());
@@ -83,9 +82,8 @@ impl Message{
             }
             7 => {
                 let index = u32::from_be_bytes(buf[5..9].try_into().unwrap());
-                let begin = u32::from_be_bytes(buf[9..13].try_into().unwrap());
-                let block = buf[13..(4 + length)].to_vec(); // TODO double check this is right
-                Some(Message::Block{ index, begin, block })
+                let piece = buf[9..(4 + length)].to_vec(); // TODO double check this is right
+                Some(Message::Piece{ index,  piece })
             }
             8 => {
                 let index = u32::from_be_bytes(buf[5..9].try_into().unwrap());

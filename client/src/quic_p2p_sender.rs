@@ -186,11 +186,13 @@ impl QuicP2PConn {
         let info_hash = file_map.get(&hash).cloned().ok_or("seeder missing file info")?; 
 
 
-        let piece = read_piece_from_file(info_hash, index as u64)?;
+        let piece = read_piece_from_file(info_hash, index)?;
+        
+        let msg = Message::Piece {index, piece};
         
         
-        send.write_all(&piece).await?;
-        println!("Seeder sent piece {:?}", piece);
+        send.write_all(&msg.encode()).await?;
+        println!("Seeder sent piece {:?}", msg);
         
         conn.closed().await;
         println!("sending end quic connection closed");
@@ -202,7 +204,7 @@ impl QuicP2PConn {
     pub(crate) async fn connect_to_peer_server<'a>(
         &mut self,
         peer_addr: SocketAddr,
-        conn_tx: Sender<Vec<u8>>,
+        conn_tx: Sender<Message>,
         conn_rx: &'a mut Receiver<Message>
     ) -> Result<(), Box<dyn std::error::Error>> {
 
@@ -228,7 +230,7 @@ impl QuicP2PConn {
     async fn recv_data<'a>(
         &mut self,
         conn: Connection,
-        conn_tx: Sender<Vec<u8>>,
+        conn_tx: Sender<Message>,
         conn_rx: &'a mut Receiver<Message>
     ) -> Result<(), Box<dyn std::error::Error>> {
 
@@ -248,7 +250,9 @@ impl QuicP2PConn {
             let piece = recv.read_to_end(length as usize).await?;
             println!("received piece from per");
             
-            conn_tx.send(piece).await?;
+            let msg = Message::decode(piece).ok_or("failed to decode message")?;
+            
+            conn_tx.send(msg).await?;
         }
         
         conn.closed().await;
