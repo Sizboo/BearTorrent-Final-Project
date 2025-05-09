@@ -9,6 +9,7 @@ mod file_assembler;
 mod message;
 
 use std::collections::HashMap;
+use std::io::Write;
 use torrent_client::TorrentClient;
 use crate::file_handler::InfoHash;
 use crate::server_connection::ServerConnection;
@@ -41,6 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             seeding.await.expect("seeding broken");
         }
         "r" => {
+            input.clear();
             println!("Requesting");
             //todo will need have a requesting process like seeding above
             let mut torrent_client = server_conn.register_new_client().await?;
@@ -51,6 +53,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             let mut i :u16 = 0;
             
+            println!("Num of files: {}", files.len());
+            
             for file in files {
                 println!("Option: {} -> File: {}", i, file.name);
                 file_selection.insert(i, file);
@@ -58,9 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             
             println!("\n\n type a number for your selection:");
-
+           
+            std::io::stdout().flush();
             std::io::stdin().read_line(&mut input)?;
-            let command = input.trim().parse::<u16>().expect("invalid number");
+            let command: u16 = input.trim().parse().expect("Invalid number");
             
             let file_requested = file_selection.get(&command).unwrap();
             println!("You Requested: {}", file_requested.name);
