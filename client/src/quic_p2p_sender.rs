@@ -18,16 +18,12 @@ use tokio::time::timeout;
 use tonic::Request;
 use crate::file_handler::{read_piece_from_file, InfoHash};
 
-pub struct QuicP2PConn<'a> {
+pub struct QuicP2PConn {
     endpoint: Endpoint,
     private_key: Option<Vec<u8>>,
-    /// the sender we use to send to a PeerConnection
-    conn_tx: mpsc::Sender<Vec<u8>>,
-    conn_rx: &'a mut mpsc::Receiver<Message>,
-    file_map: &'a HashMap<[u8; 20], InfoHash>,
 }
 
-impl<'a> QuicP2PConn<'a> {
+impl QuicP2PConn {
 
     /// init_for_certificate enables a quic client to receive the server's self-signed certificate
     /// this must be called before a client can retrieve a certificate and make a quic connection
@@ -52,10 +48,7 @@ impl<'a> QuicP2PConn<'a> {
         peer_id: PeerId,
         server: ServerConnection,
         cert_ip: String,
-        conn_tx: mpsc::Sender<Vec<u8>>,
-        conn_rx: &'a mut mpsc::Receiver<Message>,
-        file_map: &'a HashMap<[u8; 20], InfoHash>,
-    ) -> Result<QuicP2PConn<'a>, Box<dyn std::error::Error>> {
+    ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
 
         let (certs, key) = {
             println!("generating self-signed certificate");
@@ -103,9 +96,6 @@ impl<'a> QuicP2PConn<'a> {
             QuicP2PConn {
                 endpoint,
                 private_key: Some(key),
-                conn_tx,
-                conn_rx,
-                file_map
             }
         )
     }
@@ -114,10 +104,7 @@ impl<'a> QuicP2PConn<'a> {
         socket: TokioUdpSocket,
         self_addr: PeerId,
         server: ServerConnection,
-        conn_tx: mpsc::Sender<Vec<u8>>,
-        conn_rx: &'a mut  mpsc::Receiver<Message>,
-        file_map: &'a HashMap<[u8; 20], InfoHash>,
-    ) -> Result<QuicP2PConn<'a>, Box<dyn std::error::Error>> {
+    ) -> Result<QuicP2PConn, Box<dyn std::error::Error>> {
         let mut server_connection = server.client.clone();
 
         let request = Request::new(self_addr);
@@ -151,15 +138,12 @@ impl<'a> QuicP2PConn<'a> {
         Ok( QuicP2PConn {
             endpoint,
             private_key: None,
-            conn_tx,
-            conn_rx,
-            file_map
         })
     }
     
     //todo quic_listener will have to take channel_rx and pass to send_data to send data from connection to our implementation
-    pub(crate) async fn quic_listener(&mut self)
-    -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn quic_listener<'a>(&mut self, file_map: &'a HashMap<[u8; 20], InfoHash> )
+                                          -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
         
         //establish timeout duration to exit if connection request is not received
@@ -171,7 +155,7 @@ impl<'a> QuicP2PConn<'a> {
         match res {
             Ok(conn) => {
                 
-                self.send_data(conn).await?;
+                self.send_data(conn,file_map).await?;
                 
                 Ok(())
             },
@@ -181,7 +165,7 @@ impl<'a> QuicP2PConn<'a> {
         }
     }
     
-    async fn send_data(&mut self, conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+    async fn send_data<'a>(&mut self, conn: Connection, file_map: &'a HashMap<[u8; 20], InfoHash>) -> Result<(), Box<dyn std::error::Error>> {
         let (mut send, mut recv) = conn.accept_bi().await?;
         
         
@@ -197,7 +181,7 @@ impl<'a> QuicP2PConn<'a> {
         }
         let (index, begin, length, hash)= request.ok_or("failed to decode request")?;
         
-        let info_hash = self.file_map.get(&hash).cloned().ok_or("seeder missing file info")?; 
+        let info_hash = file_map.get(&hash).cloned().ok_or("seeder missing file info")?; 
 
 
         let piece = read_piece_from_file(info_hash, index as u64)?;
@@ -213,8 +197,8 @@ impl<'a> QuicP2PConn<'a> {
         
     }
 
-    pub(crate) async fn connect_to_peer_server(&mut self, peer_addr: SocketAddr)
-                                               -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn connect_to_peer_server<'a>(&mut self, peer_addr: SocketAddr, conn_tx: Sender<Vec<u8>>, conn_rx: &'a mut Receiver<Message>)
+                                                   -> Result<(), Box<dyn std::error::Error>> {
 
         // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
         let timeout_duration = Duration::from_secs(4);
@@ -223,7 +207,7 @@ impl<'a> QuicP2PConn<'a> {
         
         match res {
             Ok(conn) => {
-                self.recv_data(conn).await?;
+                self.recv_data(conn, conn_tx, conn_rx).await?;
 
                 Ok(()) 
             }
@@ -235,11 +219,11 @@ impl<'a> QuicP2PConn<'a> {
         
     }
     
-    async fn recv_data(&mut self, conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+    async fn recv_data<'a>(&mut self, conn: Connection, conn_tx: Sender<Vec<u8>>, conn_rx: &'a mut Receiver<Message>) -> Result<(), Box<dyn std::error::Error>> {
 
         let (mut send, mut recv) = conn.open_bi().await?;
         
-        if let Some(msg) = self.conn_rx.recv().await {
+        if let Some(msg) = conn_rx.recv().await {
             
             println!("Send message to peer");
             send.write_all(&msg.encode()).await?;
@@ -253,7 +237,7 @@ impl<'a> QuicP2PConn<'a> {
             let piece = recv.read_to_end(length as usize).await?;
             println!("received piece from per");
             
-            self.conn_tx.send(piece).await?;
+            conn_tx.send(piece).await?;
         }
         
         conn.closed().await;

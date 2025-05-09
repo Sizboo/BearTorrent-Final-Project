@@ -17,7 +17,7 @@ use rcgen::Error;
 use tokio::time::{sleep, timeout};
 use crate::file_handler;
 use crate::file_handler::{get_info_hashes, InfoHash};
-use crate::peer_connection::*;
+use crate::file_assembler::*;
 use crate::message::Message;
 
 #[derive(Debug)]
@@ -208,7 +208,6 @@ impl TorrentClient {
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
 
         // create a PeerConnection and get the receiver
-        let (conn_tx, mut conn_rx) = FileAssembler::new();
 
         println!("peer to send {:?}", peer_id);
 
@@ -221,12 +220,9 @@ impl TorrentClient {
                 peer_id, 
                 self.server.clone(), 
                 Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
-                conn_tx.clone(),
-                &mut conn_rx,
-                &mut self.server.file_hashes,
             ).await?;
             // println!("P2P quic endpoint created successfully");
-            let res = p2p_sender.quic_listener().await;
+            let res = p2p_sender.quic_listener(&mut self.server.file_hashes).await;
             match res {
                 Ok(()) => {
                     println!("SEEDER: Quic connection within LAN success!");
@@ -259,12 +255,9 @@ impl TorrentClient {
                             peer_id,
                             self.server.clone(),
                             Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
-                            conn_tx.clone(),
-                            &mut conn_rx,
-                            &mut self.server.file_hashes,
                         ).await?;
                         // println!("SEEDER: P2P quic endpoint across NAT created successfully");
-                        match p2p_sender.quic_listener().await {
+                        match p2p_sender.quic_listener(&mut self.server.file_hashes).await {
                             Ok(()) => {
                                 println!("SEEDER: Quic connection across NAT successful!");
                                 return Ok(())
@@ -319,13 +312,14 @@ impl TorrentClient {
     }
 
     ///Used when client is requesting a file
-    pub async fn get_file_from_peer(&mut self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn get_file_from_peer(&mut self, peer_id: PeerId, assembler: &mut FileAssembler) -> Result<(), Box<dyn std::error::Error>> {
         
         //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();
         server_connection.init_cert_sender(self.self_addr).await?;
 
-        let (conn_tx, mut conn_rx) = FileAssembler::new();
+        let conn_tx = assembler.get_connection_send_handle();
+        let mut conn_rx = assembler.subscribe_new_connection();
 
         if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
@@ -337,11 +331,8 @@ impl TorrentClient {
                 priv_socket,
                 self.self_addr,
                 self.server.clone(),
-                conn_tx.clone(),
-                &mut conn_rx,
-                &mut self.server.file_hashes,
             ).await?;
-            match p2p_conn.connect_to_peer_server(lan_peer_addr).await {
+            match p2p_conn.connect_to_peer_server(lan_peer_addr, conn_tx.clone(), &mut conn_rx).await {
                 Ok(()) => {
                     println!("REQUESTER: successful connection within LAN");
                     return Ok(())
@@ -374,12 +365,9 @@ impl TorrentClient {
                     socket,
                     self.self_addr,
                     self.server.clone(),
-                    conn_tx.clone(),
-                    &mut conn_rx,
-                    &mut self.server.file_hashes,
                 ).await?;
                 
-                match p2p_conn.connect_to_peer_server(peer_addr).await {
+                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx, &mut conn_rx).await {
                     Ok(()) => {
                         println!("REQUESTER: successful connection across NAT");
                         return Ok(())

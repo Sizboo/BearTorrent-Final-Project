@@ -5,7 +5,7 @@ mod turn_fallback;
 mod connection;
 mod file_handler;
 mod piece_assembler;
-mod peer_connection;
+mod file_assembler;
 mod message;
 
 use torrent_client::TorrentClient;
