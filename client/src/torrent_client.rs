@@ -82,11 +82,11 @@ impl TorrentClient {
         };
 
 
-        let priv_addr= SocketAddrV4::new(priv_ipaddr, 0); 
+        let priv_addr= SocketAddrV4::new(priv_ipaddr, 0);
         let priv_socket = UdpSocket::bind(priv_addr).await?;
 
         let priv_port = priv_socket.local_addr()?.port();
-        
+
         println!("My private IP {:?}", priv_ipaddr);
         println!("My private port is {}", priv_port);
 
@@ -167,12 +167,12 @@ impl TorrentClient {
         let mut client = self.client.clone();
 
         let peer_list = client.get_file_peer_list(file_hash.clone()).await?.into_inner().list;
-        
+
         //we want to maximize connection which means either one connection per piece
         // or one connection per peer whichever is less.
         let num_connections = min(peer_list.len(), file_hash.pieces.len());
         let mut assembler = FileAssembler::new(InfoHash::server_to_client_hash(file_hash.clone())).await;
-       
+
         let mut connection_handles = Vec::new();
         //spawn the correct number of connections
         for i in 0..num_connections {
@@ -190,14 +190,14 @@ impl TorrentClient {
             });
             connection_handles.push(handle);
         }
-        
+
         //begin assemble task
         assembler.send_requests(num_connections, file_hash).await?;
 
         for handle in connection_handles {
             handle.await?;
         }
-        
+
         Ok(())
     }
 

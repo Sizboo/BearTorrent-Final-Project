@@ -32,7 +32,7 @@ pub struct PeerConnection {
 }
 
 impl PeerConnection {
-  
+
     async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
 
         //todo maybe don't take this here
@@ -112,7 +112,7 @@ impl PeerConnection {
 
     }
 
-    
+
     pub async fn seeder_connection(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
         let peer_id = res.into_inner();
         let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
@@ -208,17 +208,21 @@ impl PeerConnection {
         Ok(())
     }
 
-    
+
 
     ///Used when client is requesting a file
     pub async fn requester_connection(&mut self, peer_id: PeerId, conn_tx: mpsc::Sender<Message>, mut request_rx:  mpsc::Receiver<Message> ) -> Result<(), Box<dyn std::error::Error>> {
         
         //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();
+        server_connection.send_file_request(FullId {
+            self_id: Some(self.server.uid.clone()),
+            peer_id: Some(peer_id.clone()),
+        }).await?;
         server_connection.init_cert_sender(self.self_addr).await?;
 
+
         let conn_rx = Arc::new(Mutex::new(request_rx));
-        
 
         if self.self_addr.ipaddr == peer_id.ipaddr {
             let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
@@ -298,5 +302,5 @@ impl PeerConnection {
 
 
     
-    
+
 }
