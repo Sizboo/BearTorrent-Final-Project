@@ -177,29 +177,30 @@ impl QuicP2PConn {
         let (mut send, mut recv) = conn.accept_bi().await?;
         println!("Seeder accepted bi stream!");
         
-        
-        let req = recv.read_to_end(64 * 1024).await?;
-        println!("Client received req {:?}", req);
-       
-        let mut request = None;
-        if let Some(msg) = Message::decode(req) {
-            request = match msg {
-                Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
-                _ => None, 
-            };
+        loop {
+            let req = recv.read_to_end(64 * 10240 ).await?;
+            println!("Client received req {:?}", req);
+
+            let mut request = None;
+            if let Some(msg) = Message::decode(req) {
+                request = match msg {
+                    Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
+                    _ => None,
+                };
+            }
+            let (index, begin, length, hash) = request.ok_or("failed to decode request")?;
+
+            let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?;
+
+
+            let piece = read_piece_from_file(info_hash, index)?;
+
+            let msg = Message::Piece { index, piece };
+
+
+            send.write_all(&msg.encode()).await?;
+            println!("Seeder sent piece {:?}", msg);
         }
-        let (index, begin, length, hash)= request.ok_or("failed to decode request")?;
-        
-        let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?; 
-
-
-        let piece = read_piece_from_file(info_hash, index)?;
-        
-        let msg = Message::Piece {index, piece};
-        
-        
-        send.write_all(&msg.encode()).await?;
-        println!("Seeder sent piece {:?}", msg);
         
         conn.closed().await;
         println!("sending end quic connection closed");
@@ -246,24 +247,26 @@ impl QuicP2PConn {
         
         let (mut send, mut recv) = conn.open_bi().await?;
         println!("requester opened bi stream!");
-        
-        if let Some(msg) = conn_rx.lock().await.recv().await {
-            
-            println!("Send message to peer");
-            send.write_all(&msg.encode()).await?;
+        loop {
+            if let Some(msg) = conn_rx.lock().await.recv().await {
+                
+                println!("Message received of length: {:?}", msg);
+                send.write_all(&msg.encode()).await?;
+                println!("sent message");
 
-            let length: Result<u32, Box<dyn std::error::Error>> = match msg {
-                Message::Request { length, .. } => Ok(length),
-                _ => Err("length not found".into()),
-            };
-            let length = length?;
-            
-            let piece = recv.read_to_end(length as usize).await?;
-            println!("received piece from per");
-            
-            let msg = Message::decode(piece).ok_or("failed to decode message")?;
-            
-            conn_tx.send(msg).await?;
+                let length: Result<u32, Box<dyn std::error::Error>> = match msg {
+                    Message::Request { length, .. } => Ok(length),
+                    _ => Err("length not found".into()),
+                };
+                let length = length?;
+
+                let piece = recv.read_to_end(length as usize + 9).await?;
+                println!("received piece from per");
+
+                let msg = Message::decode(piece).ok_or("failed to decode message")?;
+ 
+                conn_tx.send(msg).await?;
+            }
         }
         
         conn.closed().await;
