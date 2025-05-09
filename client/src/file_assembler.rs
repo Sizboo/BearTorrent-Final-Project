@@ -86,9 +86,10 @@ impl FileAssembler {
            write_piece_to_part(info_hash.clone(), piece, index)?;
            println!("Successfully Wrote: {}", index);
         }
-       
+        
         file_handler::build_file(info_hash)
-            .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?; 
+            .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?;
+        println!("piece built");
         
         Ok(())
     }
