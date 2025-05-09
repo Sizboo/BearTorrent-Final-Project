@@ -258,7 +258,7 @@ impl QuicP2PConn {
                 };
                 let length = length?;
 
-                let piece = recv.read_to_end(length as usize + 9).await?;
+                let piece = recv.read_to_end(length as usize + 12).await?;
                 println!("received piece from per");
 
                 let msg = Message::decode(piece).ok_or("failed to decode message")?;

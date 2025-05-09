@@ -33,7 +33,7 @@ impl FileAssembler {
         file_hash: InfoHash
     ) -> Result<(), Box<dyn std::error::Error>> {
         // let (snd_tx, snd_rx) = mpsc::channel::<Message>(10); // PieceAssembler sender/receiver
-        let (conn_tx, conn_rx) = mpsc::channel::<Message>(10); // 'connection' sender/receiver
+        let (conn_tx, conn_rx) = mpsc::channel::<Message>(50); // 'connection' sender/receiver
 
         
        let mut assembler = FileAssembler {
@@ -87,7 +87,7 @@ impl FileAssembler {
     }
     
      fn subscribe_new_connection(&mut self) -> mpsc::Receiver<Message> {
-        let (request_tx, request_rx) = mpsc::channel::<Message>(10);
+        let (request_tx, request_rx) = mpsc::channel::<Message>(50);
         self.request_txs.push(request_tx);
         
         request_rx
