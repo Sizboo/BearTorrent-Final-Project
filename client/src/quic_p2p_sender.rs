@@ -193,14 +193,12 @@ impl QuicP2PConn {
 
             let piece = read_piece_from_file(info_hash, index)?;
             let len = piece.len();
-            
+            println!("Seeder sent piece of length {:?}", len);
+
             let msg = Message::Piece { index, piece };
 
 
-            let msg = &msg.encode();
-            send.write_all(msg).await?;
-            println!("Seeder sent piece of length {:?}", len);
-            send.finish()?;
+            send.write_all(&msg.encode()).await?;
         }
         
         conn.closed().await;
