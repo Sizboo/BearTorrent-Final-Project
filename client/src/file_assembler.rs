@@ -4,7 +4,7 @@ use crate::connection::connection::*;
 use crate::message::Message;
 use crate::piece_assembler::*;
 use tokio::sync::{mpsc, RwLock};
-use crate::file_handler;
+use crate::{connection, file_handler};
 use crate::file_handler::write_piece_to_part;
 use crate::torrent_client::TorrentClient;
 
@@ -43,12 +43,12 @@ impl FileAssembler {
             request_txs: Vec::new(),
         };
 
-        //todo yeah this is dumb
-        let info_hash = file_handler::InfoHash::server_to_client_hash(file_hash.clone());
-        let hash = info_hash.get_hashed_info_hash();
+        let hash = file_hash.clone().get_hashed_info_hash();
+        
+        let file_hash_clone = file_hash.clone();
 
         tokio::spawn(async move {
-            let res = FileAssembler::reassemble_loop(conn_rx, info_hash).await;
+            let res = FileAssembler::reassemble_loop(conn_rx, file_hash_clone).await;
             if res.is_err() {
                 eprintln!("{:?}", res);
             }
@@ -65,13 +65,15 @@ impl FileAssembler {
         
         //todo this must be fixed with iterating through peerlist too
         let request_tx = assembler.request_txs.pop().unwrap();
-
+        
+        let piece_length = file_hash.clone().piece_length;
+        
         for piece in file_hash.pieces {
-
+            
             let request = Message::Request {
                 index,
-                begin: file_hash.piece_length as u32 * index,
-                length: file_hash.piece_length as u32,
+                begin: piece_length * index,
+                length: piece_length,
                 hash,
             };
 
@@ -93,7 +95,7 @@ impl FileAssembler {
         request_rx
     }
     
-    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: file_handler::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
         let num_pieces = info_hash.pieces.len();
         
         for _  in 0.. num_pieces {

@@ -18,7 +18,7 @@ use rcgen::Error;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 use crate::file_handler;
-use crate::file_handler::{get_info_hashes, InfoHash};
+use crate::file_handler::{get_info_hashes};
 use crate::file_assembler::*;
 use crate::message::Message;
 
@@ -430,22 +430,19 @@ impl TorrentClient {
         let my_hashes = self.server.file_hashes.read().await.clone().into_values();
 
         for hash in my_hashes {
-           self.advertise(hash.get_server_info_hash()).await?; 
+           self.advertise(hash).await?; 
         } 
         
         Ok(())
     }
     
-    pub async fn get_server_files(&self) -> Result<Vec<InfoHash>, Box<dyn std::error::Error>> {
+    pub async fn get_server_files(&self) -> Result<Vec<ConnHash>, Box<dyn std::error::Error>> {
        let mut server_connection = self.server.client.clone();
         
         let res = server_connection.get_all_files(Request::new(())).await?;
         let server_info_hashes = res.into_inner().info_hashes;
         
-        let info_hashes = server_info_hashes.iter()
-            .map(|x| InfoHash::server_to_client_hash(x.clone())).collect::<Vec<_>>();
-        
-        Ok(info_hashes)
+        Ok(server_info_hashes)
         
     }
 }

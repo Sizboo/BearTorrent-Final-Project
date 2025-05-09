@@ -5,13 +5,13 @@ use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use crate::connection::*;
 
-#[derive(Debug, Clone)]
-pub struct InfoHash{
-    pub(crate) name: String, // Name of the file
-    file_length: u64, // Size of the file in bytes
-    piece_length: u32, // Number of bytes per piece
-    pub(crate) pieces: Vec<[u8;20]>, // hash list of the pieces
-}
+// #[derive(Debug, Clone)]
+// pub struct InfoHash{
+//     pub(crate) name: String, // Name of the file
+//     file_length: u64, // Size of the file in bytes
+//     piece_length: u32, // Number of bytes per piece
+//     pub(crate) pieces: Vec<[u8;20]>, // hash list of the pieces
+// }
 
 // Represents the status of the piece download
 #[derive(Debug)]
@@ -39,7 +39,7 @@ impl Status{
     }
 }
 
-impl InfoHash {
+impl connection::InfoHash {
     // Generate the info hash struct given a file
     pub fn new(file: DirEntry) -> std::io::Result<Self> {
         let path = file.path(); // PathBuf of the file
@@ -58,7 +58,7 @@ impl InfoHash {
         println!("Pieces: {:x?}", pieces);
         println!("File name: {}", name);
 
-        Ok(InfoHash{
+        Ok(connection::InfoHash{
             name,
             file_length,
             piece_length,
@@ -68,7 +68,7 @@ impl InfoHash {
     }
 
     // Generates a vector containing 20-byte SHA1 hash of each piece from a file
-    fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize) -> std::io::Result<Vec<[u8;20]>>{
+    fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize) -> std::io::Result<Vec<connection::PieceHash>>{
         let mut file_reader = BufReader::new(File::open(path)?);
         let mut buf = vec![0u8;piece_length];
         let mut pieces: Vec<[u8;20]> = Vec::new();
@@ -101,8 +101,11 @@ impl InfoHash {
             let bytes: [u8; 20] = result.try_into().unwrap();
             pieces.push(bytes.into());
         }
-        Ok(pieces)
-
+        let piece_hashes = pieces.iter().map(|piece| connection::PieceHash{
+            hash: piece.to_vec()
+        }).collect();
+        
+        Ok(piece_hashes)
 
     }
 
@@ -124,7 +127,7 @@ impl InfoHash {
         hasher.update(self.piece_length.to_be_bytes());
         hasher.update(self.name.as_bytes());
         for piece in &self.pieces {
-            hasher.update(piece);
+            hasher.update(piece.hash.as_slice());
         }
 
         // Finalize the hash and generate the 20-byte value
@@ -133,31 +136,31 @@ impl InfoHash {
         bytes
     }
 
-    pub fn get_server_info_hash(&self) ->  connection::InfoHash {
-
-        let pieces = self.pieces.iter().map(|x| connection::PieceHash{
-            hash: Vec::from(x)
-        }).collect::<Vec<_>>();
-
-        connection::InfoHash {
-            name: self.name.clone(),
-            file_length: self.file_length.clone(),
-            piece_length: self.piece_length.clone() as u64,
-            pieces,
-        }
-    }
-
-    pub fn server_to_client_hash(server_info_hash: connection::InfoHash) -> InfoHash {
-        
-        let pieces = server_info_hash.pieces.iter().map(|x| x.hash.clone().try_into().unwrap()).collect::<Vec<_>>();
-        
-        InfoHash {
-            name: server_info_hash.name,
-            file_length: server_info_hash.file_length,
-            piece_length: server_info_hash.piece_length as u32,
-            pieces,
-        }
-    }
+    // pub fn get_server_info_hash(&self) ->  connection::InfoHash {
+    // 
+    //     let pieces = self.pieces.iter().map(|x| connection::PieceHash{
+    //         hash: Vec::from(x)
+    //     }).collect::<Vec<_>>();
+    // 
+    //     connection::InfoHash {
+    //         name: self.name.clone(),
+    //         file_length: self.file_length.clone(),
+    //         piece_length: self.piece_length.clone() as u64,
+    //         pieces,
+    //     }
+    // }
+    // 
+    // pub fn server_to_client_hash(server_info_hash: connection::InfoHash) -> InfoHash {
+    //     
+    //     let pieces = server_info_hash.pieces.iter().map(|x| x.hash.clone().try_into().unwrap()).collect::<Vec<_>>();
+    //     
+    //     InfoHash {
+    //         name: server_info_hash.name,
+    //         file_length: server_info_hash.file_length,
+    //         piece_length: server_info_hash.piece_length as u32,
+    //         pieces,
+    //     }
+    // }
 }
 
 // Checks if a file exists, if it doesn't then it is created.
@@ -220,7 +223,7 @@ fn verify_client_dir_setup() -> () {
 }
 
 // Returns the Status struct that represents the status of the file download
-fn get_info_status(info_hash: InfoHash) -> Status {
+fn get_info_status(info_hash: connection::InfoHash) -> Status {
     let (path, is_new) = get_info_file(info_hash.name);
     let mut info_file = OpenOptions::new().write(true).read(true).open(&path).unwrap();
     match is_new {
@@ -253,27 +256,27 @@ fn get_info_status(info_hash: InfoHash) -> Status {
 
 // If the file can be completed, the .info cache file is removed and the .part
 // file moves to resources/files removing the extension
-pub(crate) fn build_file(info_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
-    match is_file_complete(info_hash.clone()) { 
+pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    match is_file_complete(info_hash.clone()) {
         true => {
             // Get both cached files
             let part_file = get_part_file(info_hash.name.clone());
             let (info_file, _) = get_info_file(info_hash.name.clone());
-            
+
             // New target file path
             let new_file_name = format!("resources/files/{}", info_hash.name);
-            
+
             // Check if the file already exists to prevent overwriting
             if exists(Path::new(&new_file_name))?{
                 return Err("File already exists in resources/files, cannot build!".into());
             }
-            
+
             // Move the .part file to resources/files
             rename(part_file, new_file_name)?;
-            
+
             // remove the .info file
             remove_file(info_file)?;
-            
+
             Ok(())
         },
         false => Err("Missing pieces for file, cannot build!".into())
@@ -281,12 +284,12 @@ pub(crate) fn build_file(info_hash: InfoHash) -> Result<(), Box<dyn std::error::
 }
 
 // Returns a bool whether all the pieces have been received
-pub(crate) fn is_file_complete(info_hash: InfoHash) -> bool {
+pub(crate) fn is_file_complete(info_hash: connection::InfoHash) -> bool {
     get_info_status(info_hash).has_all_pieces()
 }
 
 // This function writes a piece to a .part file
-pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_index: u32) -> std::io::Result<()> {
+pub(crate) fn write_piece_to_part(info_hash: connection::InfoHash, piece: Vec<u8>, piece_index: u32) -> std::io::Result<()> {
     // Verify cache directory exists
     let dir = get_client_cache_dir()?;
 
@@ -303,9 +306,9 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 
     // Update the status of the piece within the .info file
     let mut info_status = get_info_status(info_hash.clone());
-    for status in info_status.pieces_status.iter_mut(){
-        println!("Piece {}", status);
-    }
+    // for status in info_status.pieces_status.iter_mut(){
+    //     println!("Piece {}", status);
+    // }
     info_status.pieces_status[piece_index as usize] = 1u8; // Sets piece at index to true
 
     // Get the .info file and seek to the byte that represents this piece, set it to true
@@ -320,7 +323,7 @@ pub(crate) fn write_piece_to_part(info_hash: InfoHash, piece: Vec<u8>, piece_ind
 }
 
 // Reads piece data from a file given an index
-pub(crate) fn read_piece_from_file(info_hash: InfoHash, piece_index: u32) -> std::io::Result<Vec<u8>>{
+pub(crate) fn read_piece_from_file(info_hash: connection::InfoHash, piece_index: u32) -> std::io::Result<Vec<u8>>{
     let file_path = get_file(info_hash.name.clone());
     let mut file = OpenOptions::new().read(true).open(&file_path)?;
     let num_pieces = info_hash.piece_length as usize;
@@ -334,8 +337,8 @@ pub(crate) fn read_piece_from_file(info_hash: InfoHash, piece_index: u32) -> std
 // This function goes through the client's resource directory
 // to generate info hashes for each file
 // Returns: Vec<InfoHash>
-pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], InfoHash>> {
-    let mut results: HashMap<[u8;20],InfoHash> = HashMap::new();
+pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], connection::InfoHash>> {
+    let mut results: HashMap<[u8;20],connection::InfoHash> = HashMap::new();
 
     // Verify resources are set up, fetch downloaded files PathBuf
     verify_client_dir_setup();
@@ -348,7 +351,7 @@ pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], InfoHash>> {
 
         // If the entry is a file, create InfoHash and append
         if path.is_file() {
-            let temp_infohash = InfoHash::new(file)?;
+            let temp_infohash = connection::InfoHash::new(file)?;
             results.insert(temp_infohash.get_hashed_info_hash(), temp_infohash);
         }
     }

@@ -9,7 +9,7 @@ use quinn::{Connection, Endpoint, TokioRuntime};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use crate::server_connection::ServerConnection;
 use crate::torrent_client::TorrentClient;
-use crate::connection::connection::{PeerId, CertMessage, Cert};
+use crate::connection::connection::{PeerId, CertMessage, Cert, InfoHash};
 use crate::message::Message;
 use tokio::{net::UdpSocket as TokioUdpSocket, sync::mpsc};
 use tokio::io::AsyncWriteExt;
@@ -17,7 +17,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::timeout;
 use tonic::Request;
-use crate::file_handler::{read_piece_from_file, InfoHash};
+use crate::file_handler::{read_piece_from_file};
 
 pub struct QuicP2PConn {
     endpoint: Endpoint,

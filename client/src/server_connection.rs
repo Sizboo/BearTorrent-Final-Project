@@ -7,8 +7,8 @@ use stunclient::StunClient;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FullId, PeerId};
-use crate::file_handler::{get_info_hashes, InfoHash};
+use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FullId, PeerId, InfoHash};
+use crate::file_handler::{get_info_hashes};
 use crate::torrent_client::TorrentClient;
 
 #[derive(Debug, Clone)]
