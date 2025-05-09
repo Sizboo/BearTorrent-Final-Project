@@ -50,7 +50,7 @@ impl FileAssembler {
         for i in 0..info_hash.pieces.len() {
 
             let request = Message::Request {
-                index : 0,
+                index : i as u32,
                 begin: file_hash.piece_length as u32 * i as u32,
                 length: file_hash.piece_length as u32,
                 hash,
