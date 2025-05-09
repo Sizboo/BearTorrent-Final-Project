@@ -198,28 +198,20 @@ fn get_file(file_name: String) -> PathBuf {
 
 // Create the files directory if it doesn't exist
 fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
-    let dir = match exists(Path::new("resources/files")) {
-        Ok(true) => PathBuf::from("resources/files"),
-        Ok(false) => {
-            File::create("resources/files")?;
-            PathBuf::from("resources/files")
-        }
-        Err(e) => return Err(e),
-    };
-    Ok(dir)
+    let dir = Path::new("resources/files");
+    if !dir.exists(){
+        create_dir_all(dir)?;
+    }
+    Ok(dir.to_path_buf())
 }
 
 // Create the cache directory for .part and .info files if it doesn't exist
-fn get_client_cache_dir() -> std::io::Result<PathBuf> {
-    let dir = match exists(Path::new("resources/cache")) {
-        Ok(true) => PathBuf::from("resources/cache"),
-        Ok(false) => {
-            File::create("resources/cache")?;
-            PathBuf::from("resources/cache")
-        }
-        Err(e) => return Err(e),
-    };
-    Ok(dir)
+fn get_client_cache_dir() -> std::io::Result<(PathBuf)> {
+    let dir = Path::new("resources/cache");
+    if !dir.exists(){
+        create_dir_all(dir)?;
+    }
+    Ok(dir.to_path_buf())
 }
 
 // Checks the client for resources directory containing cache and files.
