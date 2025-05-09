@@ -6,7 +6,7 @@ use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, Co
 use tokio::sync::{Mutex, mpsc, Notify};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FullId, InfoHash};
+use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FileList, FullId, InfoHash};
 use crate::connection::turn_server::TurnServer;
 use crate::turn::TurnService;
 
@@ -229,6 +229,7 @@ impl Connector for ConnectionService {
 
         Ok(Response::new(()))
     }
+    
     /// get_cer() is used by the client end of the quic connection to get the server's self-signed certificate
     /// it should be called and waited upon once init_cert_sender() has been called
     /// get_cert() SHOULD NOT be called unless init_cert_sender() has completed
@@ -293,6 +294,21 @@ impl Connector for ConnectionService {
             .ok_or_else(|| Status::not_found("No client registered for that peer"))?;
 
         Ok(Response::new(client_id))
+    }
+    
+    async fn get_all_files(
+        &self,
+        request: Request<()>
+    ) -> Result<Response<FileList>, Status> {
+        
+        let info_hashes = self.file_tracker.lock().await.keys().map(|x| x.clone()).collect::<Vec<_>>();
+        
+        Ok(Response::new(
+            FileList {
+                info_hashes,
+            }
+        ))
+        
     }
 }
 

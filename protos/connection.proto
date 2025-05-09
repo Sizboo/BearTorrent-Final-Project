@@ -14,6 +14,7 @@ service Connector {
     rpc get_cert (PeerId) returns (Cert);
     rpc send_cert (CertMessage) returns (google.protobuf.Empty);
     rpc get_client_id (PeerId) returns (ClientId);
+    rpc get_all_files (google.protobuf.Empty) returns (FileList);
 }
 
 message Cert {
@@ -48,6 +49,10 @@ message FullId {
 message FileMessage {
     ClientId id = 1;
     InfoHash info_hash = 2;
+}
+
+message FileList {
+    repeated InfoHash info_hashes = 1;
 }
 
 message InfoHash {

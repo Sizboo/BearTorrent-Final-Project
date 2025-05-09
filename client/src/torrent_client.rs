@@ -10,7 +10,7 @@ use tonic::{Request, Response};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::turn_fallback::TurnFallback;
 use crate::server_connection::ServerConnection;
-use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId, InfoHash as ConnHash};
+use crate::connection::connection::{PeerId, FileMessage, ClientId, PeerList, FullId, InfoHash as ConnHash, FileList};
 use tokio_util::sync::CancellationToken;
 use local_ip_address::local_ip;
 use rcgen::Error;
@@ -22,71 +22,71 @@ use crate::message::Message;
 
 #[derive(Debug)]
 pub struct TorrentClient {
-    server: ServerConnection,
-    pub_socket: Option<UdpSocket>,
-    priv_socket: Option<UdpSocket>,
+    pub(crate) server: ServerConnection,
+    pub(crate) pub_socket: Option<UdpSocket>,
+    pub(crate) priv_socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
     // peer_conns: Vec<PeerConnection>,
 }
 
 impl TorrentClient {
-    pub async fn new(server: &mut ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
-
-        //bind port and get public facing id
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-        let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
-        let client = StunClient::new(stun_server);
-        let external_addr = client.query_external_address(&socket)?;
-
-        let ipaddr =  match external_addr.ip() {
-            IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
-            IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
-        }?;
-
-        println!("My public IP {}", external_addr.ip());
-        println!("My public PORT {}", external_addr.port());
-
-        // Get the local IP address of this machine (defaults to Ipv4)
-        let priv_ipaddr = match local_ip() {
-            Ok(ip) => {
-                match ip {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => return Err(Box::new(std::io::Error::new(ErrorKind::Other, "Cannot convert IPv6 to u32"))),
-                }
-            }
-            Err(err) => return Err(Box::new(err)),
-        };
-
-        let priv_port = 50000;
-
-        println!("My private IP {:?}", priv_ipaddr);
-        println!("My private port is {}", priv_port);
-
-        let priv_socket = UdpSocket::bind(SocketAddrV4::new(priv_ipaddr, priv_port)).await?;
-
-        let self_addr = PeerId {
-            ipaddr,
-            port: external_addr.port() as u32,
-            priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
-            priv_port: priv_port as u32,
-        };
-        socket.set_nonblocking(true)?;
-        
-        server.update_registered_peer_id(self_addr.clone()).await?;
-        
-        let server = server.clone();
-        
-        
-        
-        Ok(
-            TorrentClient {
-                server,
-                pub_socket: Some(UdpSocket::try_from(socket)?) ,
-                priv_socket: Some(priv_socket),
-                self_addr,
-            },
-        )
-    }
+    // // pub async fn new(server: &mut ServerConnection) -> Result<TorrentClient, Box<dyn std::error::Error>> {
+    // // 
+    // //     //bind port and get public facing id
+    // //     let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    // //     let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
+    // //     let client = StunClient::new(stun_server);
+    // //     let external_addr = client.query_external_address(&socket)?;
+    // // 
+    // //     let ipaddr =  match external_addr.ip() {
+    // //         IpAddr::V4(v4) => Ok(u32::from_be_bytes(v4.octets())),
+    // //         IpAddr::V6(_) => Err("Cannot convert IPv6 to u32"),
+    // //     }?;
+    // // 
+    // //     println!("My public IP {}", external_addr.ip());
+    // //     println!("My public PORT {}", external_addr.port());
+    // // 
+    // //     // Get the local IP address of this machine (defaults to Ipv4)
+    // //     let priv_ipaddr = match local_ip() {
+    // //         Ok(ip) => {
+    // //             match ip {
+    // //                 IpAddr::V4(v4) => v4,
+    // //                 IpAddr::V6(_) => return Err(Box::new(std::io::Error::new(ErrorKind::Other, "Cannot convert IPv6 to u32"))),
+    // //             }
+    // //         }
+    // //         Err(err) => return Err(Box::new(err)),
+    // //     };
+    // // 
+    // //     let priv_port = 50000;
+    // // 
+    // //     println!("My private IP {:?}", priv_ipaddr);
+    // //     println!("My private port is {}", priv_port);
+    // // 
+    // //     let priv_socket = UdpSocket::bind(SocketAddrV4::new(priv_ipaddr, priv_port)).await?;
+    // // 
+    // //     let self_addr = PeerId {
+    // //         ipaddr,
+    // //         port: external_addr.port() as u32,
+    // //         priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
+    // //         priv_port: priv_port as u32,
+    // //     };
+    // //     socket.set_nonblocking(true)?;
+    // //     
+    // //     server.update_registered_peer_id(self_addr.clone()).await?;
+    // //     
+    // //     let server = server.clone();
+    // //     
+    // //     
+    // //     
+    // //     Ok(
+    // //         TorrentClient {
+    // //             server,
+    // //             pub_socket: Some(UdpSocket::try_from(socket)?) ,
+    // //             priv_socket: Some(priv_socket),
+    // //             self_addr,
+    // //         },
+    // //     )
+    // }
 
     async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
 
@@ -173,7 +173,7 @@ impl TorrentClient {
     pub async fn seeding(server: &mut ServerConnection) -> Result<(), Box<dyn std::error::Error>> {
         
         loop {
-            let mut torrent_client = TorrentClient::new(server).await?;
+            let mut torrent_client = server.register_new_client().await?;
 
             let mut server_client = torrent_client.server.client.clone();
 
@@ -188,7 +188,7 @@ impl TorrentClient {
             match response {
                 Ok(res) => {
 
-                    let res = torrent_client.connect_to_peer(res).await;
+                    let res = torrent_client.seeder_connection(res).await;
                     if res.is_err() {
                         println!("Connect Failed: {}", res.err().unwrap());
                     }
@@ -201,7 +201,7 @@ impl TorrentClient {
         }
     }
     
-    pub async fn connect_to_peer(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn seeder_connection(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
         let peer_id = res.into_inner();
         let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let pub_port = peer_id.port as u16;
@@ -312,7 +312,7 @@ impl TorrentClient {
     }
 
     ///Used when client is requesting a file
-    pub async fn get_file_from_peer(&mut self, peer_id: PeerId, assembler: &mut FileAssembler) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn requester_connection(&mut self, peer_id: PeerId, assembler: &mut FileAssembler) -> Result<(), Box<dyn std::error::Error>> {
         
         //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();
@@ -395,17 +395,6 @@ impl TorrentClient {
         Ok(())
     }
 
-    ///download is a process used to retrieve data from a peer
-    /// parameters:
-    /// peer ip and port
-    ///
-    /// download will initiate UDP hole punching from receiving end
-    ///  then receive data
-    pub async fn download(&self) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
-    }
-
-
     /// announce is a method used update server with connection details
     /// this will primarily be used by init() and called on a periodic basis
     /// this is essentially a "keep alive" method
@@ -435,5 +424,18 @@ impl TorrentClient {
         } 
         
         Ok(())
+    }
+    
+    pub async fn get_server_files(&self) -> Result<Vec<InfoHash>, Box<dyn std::error::Error>> {
+       let mut server_connection = self.server.client.clone();
+        
+        let res = server_connection.get_all_files(Request::new(())).await?;
+        let server_info_hashes = res.into_inner().info_hashes;
+        
+        let info_hashes = server_info_hashes.iter()
+            .map(|x| InfoHash::server_to_client_hash(x.clone())).collect::<Vec<_>>();
+        
+        Ok(info_hashes)
+        
     }
 }

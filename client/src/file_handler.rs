@@ -127,6 +127,18 @@ impl InfoHash {
             pieces,
         }
     }
+    
+    pub fn server_to_client_hash(server_info_hash: connection::InfoHash) -> InfoHash {
+        
+        let pieces = server_info_hash.pieces.iter().map(|x| x.hash.clone().try_into().unwrap()).collect::<Vec<_>>();
+        
+        InfoHash {
+            name: server_info_hash.name,
+            file_length: server_info_hash.file_length,
+            piece_length: server_info_hash.piece_length,
+            pieces,
+        }
+    }
 }
 
 // Checks if a file exists, if it doesn't then it is created.

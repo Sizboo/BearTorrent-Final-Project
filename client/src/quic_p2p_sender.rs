@@ -20,7 +20,6 @@ use crate::file_handler::{read_piece_from_file, InfoHash};
 
 pub struct QuicP2PConn {
     endpoint: Endpoint,
-    private_key: Option<Vec<u8>>,
 }
 
 impl QuicP2PConn {
@@ -95,7 +94,6 @@ impl QuicP2PConn {
         Ok(
             QuicP2PConn {
                 endpoint,
-                private_key: Some(key),
             }
         )
     }
@@ -137,13 +135,13 @@ impl QuicP2PConn {
 
         Ok( QuicP2PConn {
             endpoint,
-            private_key: None,
         })
     }
     
-    //todo quic_listener will have to take channel_rx and pass to send_data to send data from connection to our implementation
-    pub(crate) async fn quic_listener<'a>(&mut self, file_map: &'a HashMap<[u8; 20], InfoHash> )
-                                          -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn quic_listener<'a>(
+        &mut self,
+        file_map: &'a HashMap<[u8; 20], InfoHash> 
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
         
         //establish timeout duration to exit if connection request is not received
@@ -165,7 +163,11 @@ impl QuicP2PConn {
         }
     }
     
-    async fn send_data<'a>(&mut self, conn: Connection, file_map: &'a HashMap<[u8; 20], InfoHash>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn send_data<'a>(
+        &mut self,
+        conn: Connection,
+        file_map: &'a HashMap<[u8; 20], InfoHash>
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (mut send, mut recv) = conn.accept_bi().await?;
         
         
@@ -197,8 +199,12 @@ impl QuicP2PConn {
         
     }
 
-    pub(crate) async fn connect_to_peer_server<'a>(&mut self, peer_addr: SocketAddr, conn_tx: Sender<Vec<u8>>, conn_rx: &'a mut Receiver<Message>)
-                                                   -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn connect_to_peer_server<'a>(
+        &mut self,
+        peer_addr: SocketAddr,
+        conn_tx: Sender<Vec<u8>>,
+        conn_rx: &'a mut Receiver<Message>
+    ) -> Result<(), Box<dyn std::error::Error>> {
 
         // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
         let timeout_duration = Duration::from_secs(4);
@@ -219,7 +225,12 @@ impl QuicP2PConn {
         
     }
     
-    async fn recv_data<'a>(&mut self, conn: Connection, conn_tx: Sender<Vec<u8>>, conn_rx: &'a mut Receiver<Message>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn recv_data<'a>(
+        &mut self,
+        conn: Connection,
+        conn_tx: Sender<Vec<u8>>,
+        conn_rx: &'a mut Receiver<Message>
+    ) -> Result<(), Box<dyn std::error::Error>> {
 
         let (mut send, mut recv) = conn.open_bi().await?;
         

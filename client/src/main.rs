@@ -42,16 +42,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "r" => {
             println!("Requesting");
             //todo will need have a requesting process like seeding above
-            let mut torrent_client = TorrentClient::new(&mut server_conn).await?;
+            let mut torrent_client = server_conn.register_new_client().await?;
 
-            //todo I really need to change how this is done
-            let _ = server_conn.update_registered_peer_id(torrent_client.self_addr);
-
-            let file_hash = 1234;
-
-            // let mut peer_list = torrent_client.file_request(server_conn.uid, file_hash).await?;
-
-            // torrent_client.get_file_from_peer(peer_list.list.pop().unwrap()).await?;
         }
         _ => {
             println!("Unknown command: {}", command);
