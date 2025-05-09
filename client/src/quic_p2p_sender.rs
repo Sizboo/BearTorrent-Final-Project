@@ -168,9 +168,9 @@ impl QuicP2PConn {
         conn: Connection,
         file_map: &'a HashMap<[u8; 20], InfoHash>
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Server Client connection success, accepting bi");
-        
+
         let (mut send, mut recv) = conn.accept_bi().await?;
+        println!("Seeder accepted bi stream!");
         
         
         let req = recv.read_to_end(64 * 1024).await?;
@@ -236,8 +236,8 @@ impl QuicP2PConn {
         conn_rx: &'a mut Receiver<Message>
     ) -> Result<(), Box<dyn std::error::Error>> {
         
-        println!("connection success, opening stream");
         let (mut send, mut recv) = conn.open_bi().await?;
+        println!("requester opened bi stream!");
         
         if let Some(msg) = conn_rx.recv().await {
             
