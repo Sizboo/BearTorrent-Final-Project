@@ -14,7 +14,8 @@ use crate::message::Message;
 use tokio::{net::UdpSocket as TokioUdpSocket, sync::mpsc};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tonic::Request;
 use crate::file_handler::{read_piece_from_file, InfoHash};
@@ -242,28 +243,44 @@ impl QuicP2PConn {
         conn_tx: Sender<Message>,
         conn_rx: Arc<Mutex<Receiver<Message>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        
-        let (mut send, mut recv) = conn.open_bi().await?;
-        println!("requester opened bi stream!");
+
+
         loop {
             if let Some(msg) = conn_rx.lock().await.recv().await {
                 
-                println!("Message received of length: {:?}", msg);
-                send.write_all(&msg.encode()).await?;
-                println!("sent message");
-
+                let (mut send, mut recv) = conn.open_bi().await?;
+                println!("requester opened bi stream!");
+                let conn_tx_clone = conn_tx.clone(); 
+                
+                
                 let length: Result<u32, Box<dyn std::error::Error>> = match msg {
                     Message::Request { length, .. } => Ok(length),
                     _ => Err("length not found".into()),
                 };
                 let length = length?;
 
-                let piece = recv.read_to_end(length as usize + 12).await?;
-                println!("received piece from per");
+                let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
+                    tokio::spawn(async move {
+                        let piece = recv.read_to_end(length as usize + 12).await?;
+                        println!("received piece from per");
 
-                let msg = Message::decode(piece).ok_or("failed to decode message")?;
- 
-                conn_tx.send(msg).await?;
+                        let msg = Message::decode(piece).ok_or("failed to decode message")?;
+
+                        conn_tx_clone.send(msg).await?;
+
+                        Ok(())
+                    });
+
+                println!("Message received of length: {:?}", msg);
+                send.write_all(&msg.encode()).await?;
+                println!("sent message");
+
+                let res = ret.await?; 
+                if res.is_err() {
+                    eprintln!("{:?}", res);
+                }
+            } else {
+                break;
             }
         }
         
