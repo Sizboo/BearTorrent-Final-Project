@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { invoke } from "@tauri-apps/api/tauri";
 import FileTable from "./components/FileTable";
 import FileDetailSidebar from "./components/FileDetailSidebar";
 import "./index.css";
@@ -17,8 +18,10 @@ const initialFiles = [
 export default function App() {
 
 
-    function handleClick() {
-        sayHello().then(alert).catch(console.error);
+    function handleHello() {
+        invoke("say_hello")
+            .then(alert)
+            .catch(console.error);
     }
 
 
