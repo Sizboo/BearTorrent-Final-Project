@@ -64,18 +64,20 @@ impl TurnFallback {
                             return;
                         }
                     };
-                    let piece = read_piece_from_file(info_hash, index);
-
-
-                    // todo get actual values for payload and index from request
-                    let payload = [].to_vec();
-                    let index = 0;
+                    
+                    let piece = match read_piece_from_file(info_hash, index) {
+                        Ok(vec) => vec,
+                        Err(e) => {
+                            eprintln!("failed to read piece: {}", e);
+                            return;
+                        }
+                    };
 
                     let reply = TurnPacket {
                         session_id: session_id.clone(),
                         target_id: Some(leecher_id.clone()),
                         body: Some(Body::Piece(TurnPiece {
-                            payload,
+                            payload: piece,
                             index,
                         })),
                     };
