@@ -83,7 +83,7 @@ message TurnPiece {
 }
 
 message TurnPieceRequest {
-    InfoHash hash = 1;
+    bytes hash = 1;
     uint32 index = 2;
 }
 
