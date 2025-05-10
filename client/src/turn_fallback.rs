@@ -133,9 +133,13 @@ impl TurnFallback {
                         match turn_packet {
                             Some(Ok(pkt)) => {
                                 if let Some(Body::Piece(tp)) = pkt.body {
-                                    let index = tp.index;
-                                    let payload = tp.payload;
-                                    // TODO: handle received pieces
+
+                                    let piece_msg = Message::Piece {
+                                        index: tp.index,
+                                        piece: tp.payload,
+                                    };
+
+                                    conn_tx.send(piece_msg).await;
                                 }
                             }
                             _ => break,
