@@ -140,6 +140,7 @@ impl PeerConnection {
         //2. try connection across NAT
         {
             let timeout_duration = Duration::from_secs(4);
+            println!("SelfID {:?}", self.self_addr);
             let res = timeout(
                 timeout_duration, 
                 self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
@@ -211,7 +212,6 @@ impl PeerConnection {
             peer_id: Some(peer_id.clone()),
         }).await?;
         
-        println!("SelfID {:?}", self.self_addr);
         
         server_connection.init_cert_sender(self.self_addr).await?;
 
