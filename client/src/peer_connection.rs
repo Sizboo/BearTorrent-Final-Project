@@ -210,6 +210,9 @@ impl PeerConnection {
             self_id: Some(self.server.uid.clone()),
             peer_id: Some(peer_id.clone()),
         }).await?;
+        
+        println!("SelfID {:?}", self.self_addr);
+        
         server_connection.init_cert_sender(self.self_addr).await?;
 
 
@@ -249,6 +252,7 @@ impl PeerConnection {
             sleep(Duration::from_millis(1000)).await;
             
             //initiate hole punch routine with other peer
+            println!("PeerId {:?}", peer_id);
             server_connection.init_punch(peer_id).await?;
             
             sleep(Duration::from_millis(250)).await;
