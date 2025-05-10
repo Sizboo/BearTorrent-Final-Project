@@ -1,7 +1,14 @@
 import { Card, CardContent, Typography, Button } from "@mui/material";
 import { motion } from "framer-motion";
 import { FiDownload } from "react-icons/fi";
+import {invoke} from "@tauri-apps/api/core";
 
+
+function handleDownload() {
+    invoke("download")
+        .then(alert)
+        .catch(console.error);
+}
 export default function FileDetailSidebar({ selected }) {
     return (
         <aside style={{ position: "fixed", bottom: "24px", right: "24px", width: "360px" }}>
@@ -35,6 +42,7 @@ export default function FileDetailSidebar({ selected }) {
                                     startIcon={<FiDownload />}
                                     sx={{ mt: 3 }}
                                     fullWidth
+                                    onClick={handleDownload}
                                 >
                                     Download
                                 </Button>

@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from '@tauri-apps/api/core';
 import FileTable from "./components/FileTable";
 import FileDetailSidebar from "./components/FileDetailSidebar";
 import "./index.css";
 import "./shimmer.css";
 import './modern-styles.css';
-import { sayHello } from "./controllers/demoController";
+
+console.log("Is Tauri environment:", "__TAURI_IPC__" in window);
 
 const initialFiles = [
     { name: "report.pdf", size: 1.2, type: "PDF", lastModified: "2023-09-12" },
@@ -23,6 +24,9 @@ export default function App() {
             .then(alert)
             .catch(console.error);
     }
+
+
+
 
 
     const [selected, setSelected] = useState(null);
@@ -46,7 +50,7 @@ export default function App() {
                 <nav className="flex gap-6">
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Home</button>
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Upload</button>
-                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleClick}>Settings</button>
+                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleHello}>Settings</button>
                 </nav>
             </header>
 
