@@ -7,6 +7,7 @@ use tonic::Status;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use std::collections::HashMap;
+use crate::file_handler::{read_piece_from_file };
 
 pub struct TurnFallback {
     /// channel for sending TurnPackets to your peer
@@ -48,6 +49,22 @@ impl TurnFallback {
             while let Some(Ok(pkt)) = inbound.next().await {
                 if let Some(Body::Request(req)) = pkt.body {
 
+                    let index: u32 = req.index;
+
+                    let hash: [u8; 20] = req
+                        .hash
+                        .as_slice()
+                        .try_into()
+                        .expect("hash was not 20 bytes");
+
+                    let info_hash = match file_map.read().await.get(&hash).cloned() {
+                        Some(h) => h,
+                        None => {
+                            eprintln!("missing file info for hash {:?}", hash);
+                            return;
+                        }
+                    };
+                    let piece = read_piece_from_file(info_hash, index);
 
 
                     // todo get actual values for payload and index from request
