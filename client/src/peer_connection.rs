@@ -115,73 +115,73 @@ impl PeerConnection {
         println!("peer to send {:?}", peer_id);
 
         //1. try connection over local NAT
-        if self.self_addr.ipaddr == peer_id.ipaddr {
-            //start quick server
-            let socket = self.priv_socket.take().unwrap();
-            let mut p2p_sender = QuicP2PConn::create_quic_server(
-                socket, 
-                peer_id, 
-                self.server.clone(), 
-                Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
-            ).await?;
-            // println!("P2P quic endpoint created successfully");
-            let res = p2p_sender.quic_listener(self.server.file_hashes.clone()).await;
-            match res {
-                Ok(()) => {
-                    println!("SEEDER: Quic connection within LAN success!");
-                    // conn_success = true
-                    return Ok(());
-                },
-                Err(e) => {
-                    println!("SEEDER: LAN based quic connection failed\n {:?}", e);
-                }
-            }
-        }
-        
-        //2. try connection across NAT
-        {
-            let timeout_duration = Duration::from_secs(10);
-            println!("SelfID {:?}", self.self_addr);
-            let res = timeout(
-                timeout_duration, 
-                self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
-            ).await?;
-            
-            match res {
-                Ok(_) => {
-                    println!("Seeder got hole punch notif");
-                    if let Ok(socket) = self.hole_punch(peer_addr).await {
-                        // println!("Returned value {:?}", socket);
-                        //start quick server
-                        
-                        
-                        let mut p2p_sender = QuicP2PConn::create_quic_server(
-                            socket,
-                            peer_id,
-                            self.server.clone(),
-                            Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
-                        ).await?;
-                        // println!("SEEDER: P2P quic endpoint across NAT created successfully");
-                        match p2p_sender.quic_listener(self.server.file_hashes.clone()).await {
-                            Ok(()) => {
-                                println!("SEEDER: Quic connection across NAT successful!");
-                                return Ok(())
-                            },
-                            Err(e) => {
-                                println!("SEEDER: Connection across NAT after hole punch failed");
-                            }
-                        }
-                    } 
-                },
-                Err(e) => {
-                    println!("SEEDER: Failed to receive hole punch trigger");
-                }
-            }
-        }
+        // if self.self_addr.ipaddr == peer_id.ipaddr {
+        //     //start quick server
+        //     let socket = self.priv_socket.take().unwrap();
+        //     let mut p2p_sender = QuicP2PConn::create_quic_server(
+        //         socket,
+        //         peer_id,
+        //         self.server.clone(),
+        //         Ipv4Addr::from(self.self_addr.priv_ipaddr).to_string(),
+        //     ).await?;
+        //     // println!("P2P quic endpoint created successfully");
+        //     let res = p2p_sender.quic_listener(self.server.file_hashes.clone()).await;
+        //     match res {
+        //         Ok(()) => {
+        //             println!("SEEDER: Quic connection within LAN success!");
+        //             // conn_success = true
+        //             return Ok(());
+        //         },
+        //         Err(e) => {
+        //             println!("SEEDER: LAN based quic connection failed\n {:?}", e);
+        //         }
+        //     }
+        // }
+        //
+        // //2. try connection across NAT
+        // {
+        //     let timeout_duration = Duration::from_secs(10);
+        //     println!("SelfID {:?}", self.self_addr);
+        //     let res = timeout(
+        //         timeout_duration,
+        //         self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
+        //     ).await?;
+        //
+        //     match res {
+        //         Ok(_) => {
+        //             println!("Seeder got hole punch notif");
+        //             if let Ok(socket) = self.hole_punch(peer_addr).await {
+        //                 // println!("Returned value {:?}", socket);
+        //                 //start quick server
+        //
+        //
+        //                 let mut p2p_sender = QuicP2PConn::create_quic_server(
+        //                     socket,
+        //                     peer_id,
+        //                     self.server.clone(),
+        //                     Ipv4Addr::from(self.self_addr.ipaddr).to_string(),
+        //                 ).await?;
+        //                 // println!("SEEDER: P2P quic endpoint across NAT created successfully");
+        //                 match p2p_sender.quic_listener(self.server.file_hashes.clone()).await {
+        //                     Ok(()) => {
+        //                         println!("SEEDER: Quic connection across NAT successful!");
+        //                         return Ok(())
+        //                     },
+        //                     Err(e) => {
+        //                         println!("SEEDER: Connection across NAT after hole punch failed");
+        //                     }
+        //                 }
+        //             }
+        //         },
+        //         Err(e) => {
+        //             println!("SEEDER: Failed to receive hole punch trigger");
+        //         }
+        //     }
+        // }
             
         // Fall back connection on TURN
         {
-      
+            println!("Trying to seed over TURN...");
             // TURN for sending here
             let client_id = self.server.uid.clone();
             let resp = self.server.client.get_client_id(peer_id).await?;
@@ -210,71 +210,72 @@ impl PeerConnection {
 
         let conn_rx = Arc::new(Mutex::new(request_rx));
 
-        if self.self_addr.ipaddr == peer_id.ipaddr {
-            let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
-            let port = peer_id.priv_port as u16;
-            let lan_peer_addr = SocketAddr::from((ip_addr, port));
-            let priv_socket = self.priv_socket.take().unwrap();
-
-            let mut p2p_conn = QuicP2PConn::create_quic_client(
-                priv_socket,
-                self.self_addr,
-                self.server.clone(),
-            ).await?;
-            
-
-            match p2p_conn.connect_to_peer_server(lan_peer_addr, conn_tx.clone(), conn_rx.clone()).await {
-                Ok(()) => {
-                    println!("REQUESTER: successful connection within LAN");
-                    return Ok(())
-                },
-                Err(_) => {
-                    println!("REQUESTER: connect over LAN failed");
-                }
-            }
-        }
-
-        {   
-            println!("In hole punch");
-            let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-            let port = peer_id.port as u16;
-            let peer_addr = SocketAddr::from((ip_addr, port));
-
-            //add pause to give other peer time to wait on notify handle
-            sleep(Duration::from_millis(1000)).await;
-            
-            //initiate hole punch routine with other peer
-            println!("PeerId {:?}", peer_id);
-            server_connection.init_punch(peer_id).await?;
-            
-            sleep(Duration::from_millis(250)).await;
-            
-            if let Ok(socket) = self.hole_punch(peer_addr).await {
-                let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-                let port = peer_id.port as u16;
-                let peer_addr = SocketAddr::from((ip_addr, port));
-
-                let mut p2p_conn = QuicP2PConn::create_quic_client(
-                    socket,
-                    self.self_addr,
-                    self.server.clone(),
-                ).await?;
-                
-                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx.clone(), conn_rx.clone()).await {
-                    Ok(()) => {
-                        println!("REQUESTER: successful connection across NAT");
-                        return Ok(())
-                    },
-                    Err(_) => {
-                        println!("REQUESTER: connect across NAT failed");
-                    }
-                }
-            } 
-        }
+        // if self.self_addr.ipaddr == peer_id.ipaddr {
+        //     let ip_addr = Ipv4Addr::from(peer_id.priv_ipaddr);
+        //     let port = peer_id.priv_port as u16;
+        //     let lan_peer_addr = SocketAddr::from((ip_addr, port));
+        //     let priv_socket = self.priv_socket.take().unwrap();
+        //
+        //     let mut p2p_conn = QuicP2PConn::create_quic_client(
+        //         priv_socket,
+        //         self.self_addr,
+        //         self.server.clone(),
+        //     ).await?;
+        //
+        //
+        //     match p2p_conn.connect_to_peer_server(lan_peer_addr, conn_tx.clone(), conn_rx.clone()).await {
+        //         Ok(()) => {
+        //             println!("REQUESTER: successful connection within LAN");
+        //             return Ok(())
+        //         },
+        //         Err(_) => {
+        //             println!("REQUESTER: connect over LAN failed");
+        //         }
+        //     }
+        // }
+        //
+        // {
+        //     println!("In hole punch");
+        //     let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+        //     let port = peer_id.port as u16;
+        //     let peer_addr = SocketAddr::from((ip_addr, port));
+        //
+        //     //add pause to give other peer time to wait on notify handle
+        //     sleep(Duration::from_millis(1000)).await;
+        //
+        //     //initiate hole punch routine with other peer
+        //     println!("PeerId {:?}", peer_id);
+        //     server_connection.init_punch(peer_id).await?;
+        //
+        //     sleep(Duration::from_millis(250)).await;
+        //
+        //     if let Ok(socket) = self.hole_punch(peer_addr).await {
+        //         let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+        //         let port = peer_id.port as u16;
+        //         let peer_addr = SocketAddr::from((ip_addr, port));
+        //
+        //         let mut p2p_conn = QuicP2PConn::create_quic_client(
+        //             socket,
+        //             self.self_addr,
+        //             self.server.clone(),
+        //         ).await?;
+        //
+        //         match p2p_conn.connect_to_peer_server(peer_addr, conn_tx.clone(), conn_rx.clone()).await {
+        //             Ok(()) => {
+        //                 println!("REQUESTER: successful connection across NAT");
+        //                 return Ok(())
+        //             },
+        //             Err(_) => {
+        //                 println!("REQUESTER: connect across NAT failed");
+        //             }
+        //         }
+        //     }
+        // }
             
         
         {
             // TURN for receiving here
+            println!("Trying to leech over TURN...");
             let client_id = self.server.uid.clone();
             let resp = self.server.client.get_client_id(peer_id).await?;
             let target_id: ClientId = resp.into_inner();

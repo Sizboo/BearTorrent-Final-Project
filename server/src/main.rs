@@ -1,26 +1,15 @@
 mod turn;
+mod connection;
 
 use std::{env, collections::HashMap, sync::Arc};
 use tonic::{transport::Server, Code, Request, Response, Status};
-use connection::{PeerId, PeerList, FileMessage, connector_server::{Connector, ConnectorServer}};
+use connection::connection::*;
+use crate::connector_server::{Connector, ConnectorServer};
+use crate::turn_server::TurnServer;
 use tokio::sync::{Mutex, mpsc, Notify, watch};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::connection::{Cert, CertMessage, ClientId, ClientRegistry, FileList, FullId, InfoHash};
-use crate::connection::turn_server::TurnServer;
 use crate::turn::TurnService;
-
-pub mod connection {
-    tonic::include_proto!("connection");
-}
-
-/// storing this in the tracker map so we can contact clients in the seeder process
-#[derive(Debug)]
-struct Seeder {
-    client_id: ClientId,
-    notify: mpsc::Sender<ClientId>,
-}
-
 
 #[derive(Debug, Default)]
 pub struct ConnectionService {

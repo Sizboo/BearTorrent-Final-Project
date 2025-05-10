@@ -1,18 +1,14 @@
-use crate::connection::connection::{turn_server::Turn, ClientId, TurnPacket};
+use crate::connection::connection::*;
+use crate::connection::connection::turn_packet::Body;
+use crate::turn_server::Turn;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, RwLock, Barrier};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tonic::{async_trait, Request, Response, Status, Streaming};
-
-
-use crate::connection::TurnPacket;
-use crate::connection::ClientId;
-use tokio::sync::mpsc;
-use tonic::Status;
+use tonic::{async_trait, Request, Response, Status, Streaming, metadata::MetadataMap};
 
 /// role within the turn service
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Role {
     Seeder,
     Leecher,
@@ -20,8 +16,8 @@ pub enum Role {
 
 /// represents a session between a leecher and seeder in the turn system
 pub struct Session {
-    seeder:  Option<(ClientId, mpsc::Sender<TurnPacket>)>,
-    leecher: Option<(ClientId, mpsc::Sender<TurnPacket>)>,
+    seeder:  Option<(ClientId, mpsc::Sender<Result<TurnPacket, Status>>)>,
+    leecher: Option<(ClientId, mpsc::Sender<Result<TurnPacket, Status>>)>,
 }
 
 impl Session {
@@ -30,7 +26,7 @@ impl Session {
     }
 
     /// register the seeder, error if already has one
-    pub fn add_seeder(&mut self, id: ClientId, tx: mpsc::Sender<TurnPacket>) -> Result<(), Status> {
+    pub fn add_seeder(&mut self, id: ClientId, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
         if self.seeder.is_some() {
             return Err(Status::resource_exhausted("Seeder already registered"));
         }
@@ -39,7 +35,7 @@ impl Session {
     }
 
     /// register the leecher, error if already has one
-    pub fn add_leecher(&mut self, id: ClientId, tx: mpsc::Sender<TurnPacket>) -> Result<(), Status> {
+    pub fn add_leecher(&mut self, id: ClientId, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
         if self.leecher.is_some() {
             return Err(Status::resource_exhausted("Leecher already registered"));
         }
@@ -48,16 +44,18 @@ impl Session {
     }
 
     /// forwards packet between the seeder and leecher based on if request or piece
+
     pub async fn forward(&self, pkt: TurnPacket) {
-        match pkt.body {
-            Some(Body::Request(req)) => {
+        println!("Forwarding TurnPacket: {:?}", pkt);
+        match &pkt.body {
+            Some(Body::Request(_)) => {
                 if let Some((_, tx)) = &self.seeder {
-                    tx.send(pkt).await;
+                    let _ = tx.send(Ok(pkt.clone())).await;
                 }
             }
-            Some(Body::Piece(tp)) => {
+            Some(Body::Piece(_)) => {
                 if let Some((_, tx)) = &self.leecher {
-                    tx.send(pkt).await;
+                    let _ = tx.send(Ok(pkt.clone())).await;
                 }
             }
             None => {}
@@ -80,7 +78,7 @@ impl Session {
 
 
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct TurnService {
     sessions: Arc<RwLock<HashMap<String, Session>>>,
 }
@@ -93,12 +91,24 @@ impl TurnService {
         session_id: String,
         client_id: ClientId,
         role: Role,
-    ) -> Result<ReceiverStream<TurnPacket>, Status> {
-        let (tx, rx) = mpsc::channel::<TurnPacket>(128);
+    ) -> Result<ReceiverStream<Result<TurnPacket, Status>>, Status> {
+        println!("Registering {:?} for session: {:?}", role, &session_id);
+        let (tx, rx) = mpsc::channel::<Result<TurnPacket, Status>>(128);
 
         let mut all = self.sessions.write().await;
-        let session = all.entry(session_id.clone())
-            .or_insert_with(Session::new);
+
+        // let session = all.entry(session_id.clone())
+        //     .or_insert_with(|| Session::new(barrier));
+
+
+        let session = if let Some(existing_session) = all.get_mut(&session_id) {
+            println!("Session {:?} already exists", session_id);
+            existing_session
+        } else {
+            println!("Creating new session for {:?}", session_id);
+            all.entry(session_id.clone())
+                .or_insert_with(|| Session::new())
+        };
 
         // fill the right slot
         match role {
@@ -119,20 +129,22 @@ impl TurnService {
     ) {
         let sessions = Arc::clone(&self.sessions);
 
-        tokio::spawn(async move {
-            while let Some(Ok(pkt)) = inbound.next().await {
-                // look up the session and forward by packet type
-                if let Some(session) = sessions.read().await.get(&session_id) {
-                    session.forward(pkt).await;
+        tokio::spawn({
+            async move {
+                while let Some(Ok(pkt)) = inbound.next().await {
+                    // look up the session and forward by packet type
+                    if let Some(session) = sessions.read().await.get(&session_id) {
+                        session.forward(pkt).await;
+                    }
                 }
-            }
 
-            // on disconnect, clean up
-            let mut all = sessions.write().await;
-            if let Some(session) = all.get_mut(&session_id) {
-                session.remove(role);
-                if session.is_empty() {
-                    all.remove(&session_id);
+                // on disconnect, clean up
+                let mut all = sessions.write().await;
+                if let Some(session) = all.get_mut(&session_id) {
+                    session.remove(role);
+                    if session.is_empty() {
+                        all.remove(&session_id);
+                    }
                 }
             }
         });
@@ -141,12 +153,13 @@ impl TurnService {
 
 #[async_trait]
 impl Turn for TurnService {
+    type registerStream = ReceiverStream<Result<TurnPacket, Status>>;
 
     /// client passes a RegisterRequest and gets registered for turn
     async fn register(
         &self,
         req: Request<RegisterRequest>,
-    ) -> Result<Response<ReceiverStream<TurnPacket>>, Status> {
+    ) -> Result<Response<ReceiverStream<Result<TurnPacket, Status>>>, Status> {
         let req = req.into_inner();
         let role = if req.is_seeder { Role::Seeder } else { Role::Leecher };
         let stream = self.register_for_session(req.session_id, req.client_id.unwrap(), role).await?;
@@ -157,11 +170,11 @@ impl Turn for TurnService {
     async fn send(
         &self,
         req: Request<tonic::Streaming<TurnPacket>>,
-    ) -> Result<Response<Empty>, Status> {
+    ) -> Result<Response<()>, Status> {
         // unpack the metadata attached to the stream
         let metadata = req.metadata();
         let session_id = extract_header(metadata, "x-session-id")?;
-        let client_id = ClientId { id: extract_header(metadata, "x-client-id")? };
+        let client_id = ClientId { uid: extract_header(metadata, "x-client-id")? };
         let role = if extract_header(metadata, "x-role")? == "seeder" {
             Role::Seeder
         } else {
@@ -169,6 +182,14 @@ impl Turn for TurnService {
         };
 
         self.start_relay(req.into_inner(), session_id, client_id, role);
-        Ok(Response::new(Empty {}))
+
+        Ok(Response::new({}))
     }
+}
+
+fn extract_header(md: &MetadataMap, key: &str) -> Result<String, Status> {
+    md.get(key)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_owned())
+        .ok_or_else(|| Status::invalid_argument(format!("missing metadata `{}`", key)))
 }

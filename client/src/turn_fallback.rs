@@ -22,7 +22,8 @@ impl TurnFallback {
         leecher_id: ClientId,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
     ) -> Result<(), Status> {
-        let session_id   = make_session_id(&seeder_id.uid, &leecher_id.uid);
+        println!("made it to start_seeding");
+        let session_id = make_session_id(&seeder_id.uid, &leecher_id.uid);
 
         // register for turn as the seeder
         let mut inbound = turn_client
@@ -34,30 +35,36 @@ impl TurnFallback {
             .await?
             .into_inner();
 
+        println!("made it past seeding register");
+
         // create channel to send pieces thru
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
 
         let session_id_clone = session_id.clone();
+
         // todo maybe refactor this it feels weird now that it's actually implemented but oh well it's late and I don't feel like doing it at the moment
         // spawns the sending task
-        tokio::spawn(async move {
-            let mut req = tonic::Request::new(outbound);
+        let mut req = tonic::Request::new(outbound);
+        println!("made it past sending req");
 
-            // attach metadata to the stream for registering with the turn service
-            let md = req.metadata_mut();
-            md.insert("x-session-id", session_id_clone.parse().unwrap());
-            md.insert("x-client-id", seeder_id.uid.parse().unwrap());
-            md.insert("x-role", "seeder".parse().unwrap());
+        // attach metadata to the stream for registering with the turn service
+        let md = req.metadata_mut();
+        md.insert("x-session-id", session_id_clone.parse().unwrap());
+        md.insert("x-client-id", seeder_id.uid.parse().unwrap());
+        md.insert("x-role", "seeder".parse().unwrap());
 
-            if let Err(e) = turn_client.send(req).await {
-                eprintln!("TURN Send stream ended unexpectedly: {}", e);
-            }
-        });
+        println!("made it past sending metadata");
+
+        if let Err(e) = turn_client.send(req).await {
+            eprintln!("TURN Send stream ended unexpectedly: {}", e);
+        }
+
 
         // main loop to receive requests and send pieces back
         tokio::spawn(async move {
+            println!("made it to Seeder loop");
             while let Some(Ok(pkt)) = inbound.next().await {
                 if let Some(Body::Request(req)) = pkt.body {
 
@@ -94,6 +101,7 @@ impl TurnFallback {
                             index,
                         })),
                     };
+                    println!("sending piece: {:}", index);
 
                     if let Err(e) = tx.send(reply).await {
                         eprintln!("failed to send piece over TURN: {}", e);
@@ -113,6 +121,7 @@ impl TurnFallback {
         conn_tx: mpsc::Sender<Message>,
         conn_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
     ) -> Result<(), Status> {
+        println!("made it to start_leeching");
         let session_id = make_session_id(&seeder_id.uid, &leecher_id.uid);
 
         // register for turn as the leecher
@@ -125,75 +134,79 @@ impl TurnFallback {
             .await?
             .into_inner();
 
+        println!("made it past leeching register");
+
         // create channel to send requests thru
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
         let session_id_clone = session_id.clone();
+
         // spawns the actual sending task
-        tokio::spawn(async move {
-            let mut req = tonic::Request::new(outbound);
+        let mut req = tonic::Request::new(outbound);
+        println!("made it past leeching req");
 
-            // attach metadata to the stream for registering with the turn service
-            let md = req.metadata_mut();
-            md.insert("x-session-id", session_id_clone.parse().unwrap());
-            md.insert("x-client-id",  seeder_id.uid.parse().unwrap());
-            md.insert("x-role", "leecher".parse().unwrap());
+        // attach metadata to the stream for registering with the turn service
+        let md = req.metadata_mut();
+        md.insert("x-session-id", session_id_clone.parse().unwrap());
+        md.insert("x-client-id",  seeder_id.uid.parse().unwrap());
+        md.insert("x-role", "leecher".parse().unwrap());
 
-            if let Err(e) = turn_client.send(req).await {
-                eprintln!("TURN Send stream ended unexpectedly: {}", e);
-            }
-        });
+        println!("made it past leeching metadata");
+
+        if let Err(e) = turn_client.send(req).await {
+            eprintln!("TURN Send stream ended unexpectedly: {}", e);
+        }
 
         // spawn a task to both receive pieces and requests and process them
         let conn_rx = Arc::clone(&conn_rx);
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    turn_packet = inbound.next() => {
-                        match turn_packet {
-                            Some(Ok(pkt)) => {
-                                if let Some(Body::Piece(tp)) = pkt.body {
+        println!("made it to Leecher loop");
+        loop {
+            tokio::select! {
+                turn_packet = inbound.next() => {
+                    match turn_packet {
+                        Some(Ok(pkt)) => {
+                            if let Some(Body::Piece(tp)) = pkt.body {
 
-                                    let piece_msg = Message::Piece {
-                                        index: tp.index,
-                                        piece: tp.payload,
-                                    };
+                                let piece_msg = Message::Piece {
+                                    index: tp.index,
+                                    piece: tp.payload,
+                                };
 
-                                    conn_tx.send(piece_msg).await;
-                                }
+                                conn_tx.send(piece_msg).await;
                             }
-                            _ => break,
                         }
+                        _ => continue,
                     }
+                }
 
-                    request_message = async {
-                        let mut rx = conn_rx.lock().await;
-                        rx.recv().await
-                    } => {
-                        match request_message {
-                            Some(req) => {
-                                let (index, hash) = if let Message::Request { index, hash, .. } = req {
-                                    (index, hash)
-                                } else {
-                                    continue;
-                                };
+                request_message = async {
+                    let mut rx = conn_rx.lock().await;
+                    rx.recv().await
+                } => {
+                    match request_message {
+                        Some(req) => {
+                            let (index, hash) = if let Message::Request { index, hash, .. } = req {
+                                (index, hash)
+                            } else {
+                                continue;
+                            };
 
-                                let request_packet = TurnPacket {
-                                    session_id: session_id.clone(),
-                                    target_id: Some(leecher_id.clone()),
-                                    body: Some(Body::Request(TurnPieceRequest {
-                                        hash: hash.to_vec(),
-                                        index,
-                                    })),
-                                };
-                            }
-                            None => break,
+                            let request_packet = TurnPacket {
+                                session_id: session_id.clone(),
+                                target_id: Some(leecher_id.clone()),
+                                body: Some(Body::Request(TurnPieceRequest {
+                                    hash: hash.to_vec(),
+                                    index,
+                                })),
+                            };
+                            println!("requested piece {}", index);
                         }
+                        None => continue,
                     }
                 }
             }
-        });
+        }
 
         Ok(())
     }
