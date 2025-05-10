@@ -260,7 +260,7 @@ impl PeerConnection {
                     self.server.clone(),
                 ).await?;
                 
-                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx, conn_rx.clone()).await {
+                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx.clone(), conn_rx.clone()).await {
                     Ok(()) => {
                         println!("REQUESTER: successful connection across NAT");
                         return Ok(())
@@ -278,7 +278,7 @@ impl PeerConnection {
             let client_id = self.server.uid.clone();
             let resp = self.server.client.get_client_id(peer_id).await?;
             let target_id: ClientId = resp.into_inner();
-            TurnFallback::start_leeching(self.server.turn.clone(), client_id, target_id, conn_rx).await;
+            TurnFallback::start_leeching(self.server.turn.clone(), client_id, target_id, conn_tx, conn_rx).await;
 
             // // TODO remove... just needed to have this to keep the program open long enough to receive data
             // tokio::time::sleep(Duration::from_secs(5)).await;

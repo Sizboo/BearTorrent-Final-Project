@@ -64,7 +64,7 @@ impl TurnFallback {
                             return;
                         }
                     };
-                    
+
                     let piece = match read_piece_from_file(info_hash, index) {
                         Ok(vec) => vec,
                         Err(e) => {
@@ -100,6 +100,7 @@ impl TurnFallback {
         mut turn_client: TurnClient<tonic::transport::Channel>,
         leecher_id: ClientId,
         seeder_id: ClientId,
+        conn_tx: mpsc::Sender<Message>,
         conn_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
     ) -> Result<(), Status> {
         let session_id   = make_session_id(&seeder_id.uid, &leecher_id.uid);
