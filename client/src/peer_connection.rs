@@ -6,11 +6,12 @@ use std::time::Duration;
 use tonic::{Response};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::torrent_client::TorrentClient;
-use crate::connection::connection::{PeerId, FullId};
+use crate::connection::connection::{PeerId, FullId, ClientId};
 use tokio_util::sync::CancellationToken;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 use crate::message::Message;
+use crate::turn_fallback::TurnFallback;
 
 #[derive(Debug)]
 pub struct PeerConnection {
@@ -183,7 +184,8 @@ impl PeerConnection {
       
             // TURN for sending here
             let client_id = self.server.uid.clone();
-            let target_id = self.server.client.get_client_id(peer_id).await?;
+            let resp = self.server.client.get_client_id(peer_id).await?;
+            let target_id: ClientId = resp.into_inner();
             let fallback = TurnFallback::start_seeding(self.server.turn.clone(), client_id, target_id).await?;
         }
 
@@ -274,7 +276,8 @@ impl PeerConnection {
         {
             // TURN for receiving here
             let client_id = self.server.uid.clone();
-            let target_id = self.server.client.get_client_id(peer_id).await?;
+            let resp = self.server.client.get_client_id(peer_id).await?;
+            let target_id: ClientId = resp.into_inner();
             let fallback = TurnFallback::start_leeching(self.server.turn.clone(), client_id, target_id).await?;
 
             // // TODO remove... just needed to have this to keep the program open long enough to receive data

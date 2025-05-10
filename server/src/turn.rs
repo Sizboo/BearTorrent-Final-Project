@@ -1,4 +1,4 @@
-use crate::connection::{turn_server::Turn, ClientId, TurnPacket};
+use crate::connection::connection::{turn_server::Turn, ClientId, TurnPacket};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};

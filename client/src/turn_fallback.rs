@@ -1,4 +1,4 @@
-use crate::connection::{turn_client::TurnClient, ClientId, RegisterRequest, TurnPacket, turn_packet::Body, };
+use crate::connection::connection::{turn_client::TurnClient, ClientId, RegisterRequest, TurnPacket, turn_packet::Body, TurnPiece};
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::Status;
@@ -18,13 +18,13 @@ impl TurnFallback {
         seeder_id: ClientId,
         leecher_id: ClientId,
     ) -> Result<Self, Status> {
-        let session_id   = make_session_id(seeder_id.uid, leecher_id.uid);
+        let session_id   = make_session_id(&seeder_id.uid, &leecher_id.uid);
 
         // 1) Register for incoming Requests from leecher:
         let mut inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
-                client_id: leecher_id.clone(),
+                client_id: Some(leecher_id.clone()),
                 is_seeder: true,
             })
             .await?
@@ -47,7 +47,7 @@ impl TurnFallback {
 
                     let reply = TurnPacket {
                         session_id: session_id.clone(),
-                        target_id: leecher_id.clone(),
+                        target_id: Some(leecher_id.clone()),
                         body: Some(Body::Piece(TurnPiece {
                             payload,
                             index,
@@ -78,7 +78,7 @@ impl TurnFallback {
         leecher_id: ClientId,
         seeder_id: ClientId,
     ) -> Result<Self, Status> {
-        let session_id   = make_session_id(seeder_id.uid, leecher_id.uid);
+        let session_id   = make_session_id(&seeder_id.uid, &leecher_id.uid);
 
         // 1) Register for incoming Pieces from seeder:
         let mut inbound = turn_client

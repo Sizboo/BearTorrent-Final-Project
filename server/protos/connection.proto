@@ -72,7 +72,7 @@ message PeerList {
 }
 
 message RegisterRequest {
-    ClientId session_id = 1;
+    string session_id = 1;
     ClientId client_id  = 2;
     bool is_seeder = 3;
 }
@@ -82,13 +82,13 @@ message TurnPiece {
     uint32 index = 2;
 }
 
-message PieceRequest {
+message TurnPieceRequest {
     InfoHash hash = 1;
     uint32 index = 2;
 }
 
 message TurnPacket {
-    ClientId session_id = 1;
+    string session_id = 1;
     ClientId target_id = 2;
     oneof body {
         TurnPiece piece = 3;
