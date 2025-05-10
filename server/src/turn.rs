@@ -3,7 +3,7 @@ use crate::connection::connection::turn_packet::Body;
 use crate::turn_server::Turn;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock, Barrier};
+use tokio::{sync::{mpsc, RwLock, Barrier}, time::{sleep, Duration}};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{async_trait, Request, Response, Status, Streaming, metadata::MetadataMap};
 
@@ -18,15 +18,17 @@ pub enum Role {
 pub struct Session {
     seeder:  Option<(ClientId, mpsc::Sender<Result<TurnPacket, Status>>)>,
     leecher: Option<(ClientId, mpsc::Sender<Result<TurnPacket, Status>>)>,
+    barrier: Arc<Barrier>,
 }
 
 impl Session {
-    pub fn new() -> Self {
-        Session { seeder: None, leecher: None }
+    pub fn new(barrier: Arc<Barrier>) -> Self {
+        Session { seeder: None, leecher: None, barrier }
     }
 
     /// register the seeder, error if already has one
     pub fn add_seeder(&mut self, id: ClientId, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
+        println!("add_seeder called");
         if self.seeder.is_some() {
             return Err(Status::resource_exhausted("Seeder already registered"));
         }
@@ -36,6 +38,7 @@ impl Session {
 
     /// register the leecher, error if already has one
     pub fn add_leecher(&mut self, id: ClientId, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
+        println!("add_leecher called");
         if self.leecher.is_some() {
             return Err(Status::resource_exhausted("Leecher already registered"));
         }
@@ -97,24 +100,24 @@ impl TurnService {
 
         let mut all = self.sessions.write().await;
 
-        // let session = all.entry(session_id.clone())
-        //     .or_insert_with(|| Session::new(barrier));
-
-
-        let session = if let Some(existing_session) = all.get_mut(&session_id) {
-            println!("Session {:?} already exists", session_id);
-            existing_session
-        } else {
-            println!("Creating new session for {:?}", session_id);
-            all.entry(session_id.clone())
-                .or_insert_with(|| Session::new())
-        };
+        let session = all.entry(session_id.clone())
+            .or_insert_with(|| {
+                println!("Creating new session for {:?}", session_id);
+                // create a Barrier for exactly two arrivals
+                let barrier = Arc::new(Barrier::new(2));
+                Session::new(barrier)
+            });
 
         // fill the right slot
         match role {
             Role::Seeder => session.add_seeder(client_id, tx)?,
             Role::Leecher => session.add_leecher(client_id, tx)?,
         }
+        let barrier = session.barrier.clone();
+        drop(all);
+
+        barrier.wait().await;
+        println!("Both peers registered for session {}", session_id);
 
         Ok(ReceiverStream::new(rx))
     }
@@ -130,20 +133,32 @@ impl TurnService {
         let sessions = Arc::clone(&self.sessions);
 
         tokio::spawn({
-            async move {
-                while let Some(Ok(pkt)) = inbound.next().await {
-                    // look up the session and forward by packet type
-                    if let Some(session) = sessions.read().await.get(&session_id) {
-                        session.forward(pkt).await;
-                    }
-                }
+            // clone the shared state for the task
+            let sessions = Arc::clone(&self.sessions);
+            let session_id = session_id.clone();
+            let role = role;
+            // inbound is the tonic::Streaming<TurnPacket>
+            let mut inbound = inbound;
 
-                // on disconnect, clean up
-                let mut all = sessions.write().await;
-                if let Some(session) = all.get_mut(&session_id) {
-                    session.remove(role);
-                    if session.is_empty() {
-                        all.remove(&session_id);
+
+            async move {
+                loop {
+                    println!("inside relay loop for {:?}", role);
+                    match inbound.next().await {
+                        Some(Ok(pkt)) => {
+                            if let Some(session) = sessions.read().await.get(&session_id) {
+                                session.forward(pkt).await;
+                            }
+                        }
+
+                        Some(Err(e)) => {
+                            eprintln!("error reading inbound TURN packet: {:?}", e);
+                            break;
+                        }
+
+                        None => {
+                            sleep(Duration::from_secs(1)).await;
+                        }
                     }
                 }
             }
@@ -171,7 +186,7 @@ impl Turn for TurnService {
         &self,
         req: Request<tonic::Streaming<TurnPacket>>,
     ) -> Result<Response<()>, Status> {
-        // unpack the metadata attached to the stream
+        // unpack metadata
         let metadata = req.metadata();
         let session_id = extract_header(metadata, "x-session-id")?;
         let client_id = ClientId { uid: extract_header(metadata, "x-client-id")? };
@@ -181,10 +196,29 @@ impl Turn for TurnService {
             Role::Leecher
         };
 
-        self.start_relay(req.into_inner(), session_id, client_id, role);
+        let mut inbound = req.into_inner();
+        loop {
+            match inbound.next().await {
+                Some(Ok(pkt)) => {
+                    if let Some(session) = self.sessions.read().await.get(&session_id) {
+                        session.forward(pkt).await;
+                    }
+                }
+                Some(Err(e)) => {
+                    return Err(Status::internal(format!(
+                        "error reading inbound TURN packet: {:?}",
+                        e
+                    )));
+                }
+                None => {
+                    break;
+                }
+            }
+        }
 
-        Ok(Response::new({}))
+        Ok(Response::new(()))
     }
+
 }
 
 fn extract_header(md: &MetadataMap, key: &str) -> Result<String, Status> {

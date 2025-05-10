@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::Status;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::{sync::{Mutex, RwLock}, time::{sleep, Duration}};
 use std::collections::HashMap;
 use crate::file_handler::{read_piece_from_file };
 
@@ -25,7 +25,7 @@ impl TurnFallback {
         println!("made it to start_seeding");
         let session_id = make_session_id(&seeder_id.uid, &leecher_id.uid);
 
-        // register for turn as the seeder
+        // 1) Register for TURN as the seeder (this is a unary→stream RPC)
         let mut inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
@@ -37,74 +37,95 @@ impl TurnFallback {
 
         println!("made it past seeding register");
 
-        // create channel to send pieces thru
+        // 2) Create your local channel and wrap it in a ReceiverStream
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
-
-        let session_id_clone = session_id.clone();
-
-        // todo maybe refactor this it feels weird now that it's actually implemented but oh well it's late and I don't feel like doing it at the moment
-        // spawns the sending task
+        // 3) Build the Request with metadata
         let mut req = tonic::Request::new(outbound);
         println!("made it past sending req");
-
-        // attach metadata to the stream for registering with the turn service
         let md = req.metadata_mut();
-        md.insert("x-session-id", session_id_clone.parse().unwrap());
-        md.insert("x-client-id", seeder_id.uid.parse().unwrap());
-        md.insert("x-role", "seeder".parse().unwrap());
-
+        md.insert("x-session-id", session_id.parse().unwrap());
+        md.insert("x-client-id",   seeder_id.uid.parse().unwrap());
+        md.insert("x-role",        "seeder".parse().unwrap());
         println!("made it past sending metadata");
 
-        if let Err(e) = turn_client.send(req).await {
-            eprintln!("TURN Send stream ended unexpectedly: {}", e);
-        }
-
-
-        // main loop to receive requests and send pieces back
+        // 4) Spawn the send() future so the TURN send‐stream stays open
+        let mut client_clone = turn_client.clone();
         tokio::spawn(async move {
-            println!("made it to Seeder loop");
-            while let Some(Ok(pkt)) = inbound.next().await {
-                if let Some(Body::Request(req)) = pkt.body {
+            match client_clone.send(req).await {
+                Ok(_) => eprintln!("TURN send RPC ended normally"),
+                Err(e) => eprintln!("TURN send stream ended unexpectedly: {}", e),
+            }
+        });
 
-                    let index: u32 = req.index;
+        // 5) Now spawn your seeder‐loop to read inbound piece‐requests and reply
+        tokio::spawn({
+            let mut inbound = inbound;
+            let file_map = file_map.clone();
+            let session_id = session_id.clone();
+            let leecher_id = leecher_id.clone();
+            let mut tx = tx.clone();
 
-                    // turn the request's hash (bytes in the proto file ik yuck) into the msg form
-                    let hash: [u8; 20] = req
-                        .hash
-                        .as_slice()
-                        .try_into()
-                        .expect("hash was not 20 bytes");
+            async move {
+                println!("made it to Seeder loop");
+                loop {
+                    match inbound.next().await {
+                        Some(Ok(pkt)) => {
+                            println!("received {:?}", pkt);
+                            if let Some(Body::Request(req)) = pkt.body {
+                                let index: u32 = req.index;
+                                println!("received request of index: {}", index);
 
-                    let info_hash = match file_map.read().await.get(&hash).cloned() {
-                        Some(h) => h,
+                                // turn proto‐bytes into a fixed [u8;20]
+                                let hash: [u8; 20] = req
+                                    .hash
+                                    .as_slice()
+                                    .try_into()
+                                    .expect("hash was not 20 bytes");
+
+                                // lookup the file
+                                let info_hash = match file_map.read().await.get(&hash).cloned() {
+                                    Some(h) => h,
+                                    None => {
+                                        eprintln!("missing file info for hash {:?}", hash);
+                                        return;
+                                    }
+                                };
+
+                                // load the piece
+                                let piece = match read_piece_from_file(info_hash, index) {
+                                    Ok(vec) => vec,
+                                    Err(e) => {
+                                        eprintln!("failed to read piece: {}", e);
+                                        return;
+                                    }
+                                };
+
+                                // send it back over TURN
+                                let reply = TurnPacket {
+                                    session_id: session_id.clone(),
+                                    target_id:  Some(leecher_id.clone()),
+                                    body:        Some(Body::Piece(TurnPiece { payload: piece, index })),
+                                };
+                                println!("sending piece: {}", index);
+                                if let Err(e) = tx.send(reply).await {
+                                    eprintln!("failed to send piece over TURN: {}", e);
+                                }
+                            }
+                        }
+
+                        Some(Err(e)) => {
+                            eprintln!("error reading inbound TURN packet: {:?}", e);
+                            // you might break here if you want to tear down on error
+                            continue;
+                        }
+
                         None => {
-                            eprintln!("missing file info for hash {:?}", hash);
-                            return;
+                            // client really closed their send‑stream
+                            println!("inbound stream closed, exiting Seeder loop");
+                            break;
                         }
-                    };
-
-                    let piece = match read_piece_from_file(info_hash, index) {
-                        Ok(vec) => vec,
-                        Err(e) => {
-                            eprintln!("failed to read piece: {}", e);
-                            return;
-                        }
-                    };
-
-                    let reply = TurnPacket {
-                        session_id: session_id.clone(),
-                        target_id: Some(leecher_id.clone()),
-                        body: Some(Body::Piece(TurnPiece {
-                            payload: piece,
-                            index,
-                        })),
-                    };
-                    println!("sending piece: {:}", index);
-
-                    if let Err(e) = tx.send(reply).await {
-                        eprintln!("failed to send piece over TURN: {}", e);
                     }
                 }
             }
@@ -112,6 +133,7 @@ impl TurnFallback {
 
         Ok(())
     }
+
 
     /// function to start leeching via TURN
     pub async fn start_leeching(
@@ -152,14 +174,18 @@ impl TurnFallback {
         md.insert("x-client-id",  seeder_id.uid.parse().unwrap());
         md.insert("x-role", "leecher".parse().unwrap());
 
-        println!("made it past leeching metadata");
 
-        if let Err(e) = turn_client.send(req).await {
-            eprintln!("TURN Send stream ended unexpectedly: {}", e);
-        }
+        let mut client_clone = turn_client.clone();
+        tokio::spawn(async move {
+            match client_clone.send(req).await {
+                Ok(_) => eprintln!("TURN send RPC ended normally"),
+                Err(e) => eprintln!("TURN send stream ended unexpectedly: {}", e),
+            }
+        });
 
         // spawn a task to both receive pieces and requests and process them
         let conn_rx = Arc::clone(&conn_rx);
+        //sleep(Duration::from_secs(10)).await;
         println!("made it to Leecher loop");
         loop {
             tokio::select! {
@@ -184,25 +210,20 @@ impl TurnFallback {
                     let mut rx = conn_rx.lock().await;
                     rx.recv().await
                 } => {
-                    match request_message {
-                        Some(req) => {
-                            let (index, hash) = if let Message::Request { index, hash, .. } = req {
-                                (index, hash)
-                            } else {
-                                continue;
-                            };
-
-                            let request_packet = TurnPacket {
-                                session_id: session_id.clone(),
-                                target_id: Some(leecher_id.clone()),
-                                body: Some(Body::Request(TurnPieceRequest {
-                                    hash: hash.to_vec(),
-                                    index,
-                                })),
-                            };
-                            println!("requested piece {}", index);
+                    if let Some(Message::Request { index, hash, .. }) = request_message {
+                        let request_packet = TurnPacket {
+                            session_id: session_id.clone(),
+                            target_id: Some(leecher_id.clone()),
+                            body: Some(Body::Request(TurnPieceRequest {
+                                hash: hash.to_vec(),
+                                index,
+                            })),
+                        };
+                        println!("requested piece {}", index);
+                        // now there *is* a live receiver pulling from `rx`
+                        if let Err(e) = tx.send(request_packet).await {
+                            eprintln!("failed to queue request: {}", e);
                         }
-                        None => continue,
                     }
                 }
             }
