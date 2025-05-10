@@ -15,10 +15,7 @@ pub struct TurnFallback {
 }
 
 impl TurnFallback {
-    /// Call this on the **seeder** side.
-    /// - `session_id`: your torrent’s info_hash (or UUID)
-    /// - `seeder_id`: your ClientId
-    /// - `leecher_id`: the peer’s ClientId
+    /// function to start seeding via TURN
     pub async fn start_seeding(
         mut turn_client: TurnClient<tonic::transport::Channel>,
         seeder_id: ClientId,
@@ -27,7 +24,7 @@ impl TurnFallback {
     ) -> Result<(), Status> {
         let session_id   = make_session_id(&seeder_id.uid, &leecher_id.uid);
 
-        // 1) Register for incoming Requests from leecher:
+        // register for turn as the seeder
         let mut inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
@@ -37,20 +34,36 @@ impl TurnFallback {
             .await?
             .into_inner();
 
-        // 2) Create an outbound channel to send Pieces:
+        // create channel to send pieces thru
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
 
-        let _ = turn_client.send(outbound).await;
+        let session_id_clone = session_id.clone();
+        // todo maybe refactor this it feels weird now that it's actually implemented but oh well it's late and I don't feel like doing it at the moment
+        // spawns the sending task
+        tokio::spawn(async move {
+            let mut req = tonic::Request::new(outbound);
 
-        // 3) Spawn a task to receive Requests and stub‐handle them:
+            // attach metadata to the stream for registering with the turn service
+            let md = req.metadata_mut();
+            md.insert("x-session-id", session_id_clone.parse().unwrap());
+            md.insert("x-client-id", seeder_id.uid.parse().unwrap());
+            md.insert("x-role", "seeder".parse().unwrap());
+
+            if let Err(e) = turn_client.send(req).await {
+                eprintln!("TURN Send stream ended unexpectedly: {}", e);
+            }
+        });
+
+        // main loop to receive requests and send pieces back
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
                 if let Some(Body::Request(req)) = pkt.body {
 
                     let index: u32 = req.index;
 
+                    // turn the request's hash (bytes in the proto file ik yuck) into the msg form
                     let hash: [u8; 20] = req
                         .hash
                         .as_slice()
@@ -92,10 +105,7 @@ impl TurnFallback {
         Ok(())
     }
 
-    /// Call this on the **leecher** side.
-    /// - `session_id`: your torrent’s info_hash (or UUID)
-    /// - `leecher_id`: your ClientId
-    /// - `seeder_id`: the peer’s ClientId
+    /// function to start leeching via TURN
     pub async fn start_leeching(
         mut turn_client: TurnClient<tonic::transport::Channel>,
         leecher_id: ClientId,
@@ -103,9 +113,9 @@ impl TurnFallback {
         conn_tx: mpsc::Sender<Message>,
         conn_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
     ) -> Result<(), Status> {
-        let session_id   = make_session_id(&seeder_id.uid, &leecher_id.uid);
+        let session_id = make_session_id(&seeder_id.uid, &leecher_id.uid);
 
-        // 1) Register for incoming Pieces from seeder:
+        // register for turn as the leecher
         let mut inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
@@ -115,16 +125,27 @@ impl TurnFallback {
             .await?
             .into_inner();
 
-        // 3) Create an outbound channel to send Requests:
+        // create channel to send requests thru
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
-        // 4) Spawn a task to pump Requests into the Send RPC:
+        let session_id_clone = session_id.clone();
+        // spawns the actual sending task
         tokio::spawn(async move {
-            let _ = turn_client.send(outbound).await;
+            let mut req = tonic::Request::new(outbound);
+
+            // attach metadata to the stream for registering with the turn service
+            let md = req.metadata_mut();
+            md.insert("x-session-id", session_id_clone.parse().unwrap());
+            md.insert("x-client-id",  seeder_id.uid.parse().unwrap());
+            md.insert("x-role", "leecher".parse().unwrap());
+
+            if let Err(e) = turn_client.send(req).await {
+                eprintln!("TURN Send stream ended unexpectedly: {}", e);
+            }
         });
 
-        // 2) Spawn a task to receive Pieces and Requests
+        // spawn a task to both receive pieces and requests and process them
         let conn_rx = Arc::clone(&conn_rx);
         tokio::spawn(async move {
             loop {
@@ -176,16 +197,10 @@ impl TurnFallback {
 
         Ok(())
     }
-
-    /// Utility for either side to send a TurnPacket to its peer:
-    pub async fn send(&self, pkt: TurnPacket) -> Result<(), Status> {
-        self.tx
-            .send(pkt)
-            .await
-            .map_err(|e| Status::unavailable(format!("failed to send TurnPacket: {}", e)))
-    }
 }
 
+
+/// function to join 2 ClientIds to make a string for use as a session id for turn
 fn make_session_id(a: &str, b: &str) -> String {
     let mut pair = [a, b];
     pair.sort_unstable();

@@ -11,18 +11,17 @@ use crate::connection::ClientId;
 use tokio::sync::mpsc;
 use tonic::Status;
 
-type Sender = mpsc::Sender<TurnPacket>;
-
+/// role within the turn service
 #[derive(Clone, Copy)]
 pub enum Role {
     Seeder,
     Leecher,
 }
 
-/// a session has a seeder and a leecher
+/// represents a session between a leecher and seeder in the turn system
 pub struct Session {
-    seeder:  Option<(ClientId, Sender)>,
-    leecher: Option<(ClientId, Sender)>,
+    seeder:  Option<(ClientId, mpsc::Sender<TurnPacket>)>,
+    leecher: Option<(ClientId, mpsc::Sender<TurnPacket>)>,
 }
 
 impl Session {
@@ -30,8 +29,8 @@ impl Session {
         Session { seeder: None, leecher: None }
     }
 
-    /// register the seeder, error if already one
-    pub fn add_seeder(&mut self, id: ClientId, tx: Sender) -> Result<(), Status> {
+    /// register the seeder, error if already has one
+    pub fn add_seeder(&mut self, id: ClientId, tx: mpsc::Sender<TurnPacket>) -> Result<(), Status> {
         if self.seeder.is_some() {
             return Err(Status::resource_exhausted("Seeder already registered"));
         }
@@ -39,8 +38,8 @@ impl Session {
         Ok(())
     }
 
-    /// register the leecher, error if already one
-    pub fn add_leecher(&mut self, id: ClientId, tx: Sender) -> Result<(), Status> {
+    /// register the leecher, error if already has one
+    pub fn add_leecher(&mut self, id: ClientId, tx: mpsc::Sender<TurnPacket>) -> Result<(), Status> {
         if self.leecher.is_some() {
             return Err(Status::resource_exhausted("Leecher already registered"));
         }
@@ -48,35 +47,32 @@ impl Session {
         Ok(())
     }
 
-    /// Forward an incoming packet to the *other* side,
-    /// based on its body type:
-    /// - Requests → the seeder
-    /// - Pieces   → the leecher
+    /// forwards packet between the seeder and leecher based on if request or piece
     pub async fn forward(&self, pkt: TurnPacket) {
         match pkt.body {
-            Some(Body::Request(_req)) => {
+            Some(Body::Request(req)) => {
                 if let Some((_, tx)) = &self.seeder {
-                    let _ = tx.send(pkt).await;
+                    tx.send(pkt).await;
                 }
             }
-            Some(Body::Piece(_tp)) => {
+            Some(Body::Piece(tp)) => {
                 if let Some((_, tx)) = &self.leecher {
-                    let _ = tx.send(pkt).await;
+                    tx.send(pkt).await;
                 }
             }
             None => {}
         }
     }
 
-    /// Remove one side when it disconnects.
+    /// disconnect logic
     pub fn remove(&mut self, role: Role) {
         match role {
-            Role::Seeder  => self.seeder  = None,
+            Role::Seeder => self.seeder = None,
             Role::Leecher => self.leecher = None,
         }
     }
 
-    /// If both have disconnected, the session can be dropped.
+    /// drop logic
     pub fn is_empty(&self) -> bool {
         self.seeder.is_none() && self.leecher.is_none()
     }
@@ -90,6 +86,8 @@ pub struct TurnService {
 }
 
 impl TurnService {
+
+    /// registers a client for the turn service as either a seeder or a leecher
     async fn register_for_session(
         &self,
         session_id: String,
@@ -102,15 +100,16 @@ impl TurnService {
         let session = all.entry(session_id.clone())
             .or_insert_with(Session::new);
 
-        // fill exactly the right slot
+        // fill the right slot
         match role {
-            Role::Seeder  => session.add_seeder(client_id, tx)?,
+            Role::Seeder => session.add_seeder(client_id, tx)?,
             Role::Leecher => session.add_leecher(client_id, tx)?,
         }
 
         Ok(ReceiverStream::new(rx))
     }
 
+    /// starts the turn relay over a session
     fn start_relay(
         &self,
         mut inbound: tonic::Streaming<TurnPacket>,
@@ -128,7 +127,7 @@ impl TurnService {
                 }
             }
 
-            // on disconnect: clean up our slot
+            // on disconnect, clean up
             let mut all = sessions.write().await;
             if let Some(session) = all.get_mut(&session_id) {
                 session.remove(role);
@@ -142,27 +141,28 @@ impl TurnService {
 
 #[async_trait]
 impl Turn for TurnService {
-    type RegisterStream = ReceiverStream<TurnPacket>;
 
+    /// client passes a RegisterRequest and gets registered for turn
     async fn register(
         &self,
         req: Request<RegisterRequest>,
-    ) -> Result<Response<Self::RegisterStream>, Status> {
+    ) -> Result<Response<ReceiverStream<TurnPacket>>, Status> {
         let req = req.into_inner();
         let role = if req.is_seeder { Role::Seeder } else { Role::Leecher };
         let stream = self.register_for_session(req.session_id, req.client_id.unwrap(), role).await?;
         Ok(Response::new(stream))
     }
 
+    /// initiates the turn relay across a session
     async fn send(
         &self,
         req: Request<tonic::Streaming<TurnPacket>>,
     ) -> Result<Response<Empty>, Status> {
+        // unpack the metadata attached to the stream
         let metadata = req.metadata();
-        // assume you packed session_id, client_id, and role into headers or use a custom message
         let session_id = extract_header(metadata, "x-session-id")?;
-        let client_id  = ClientId { id: extract_header(metadata, "x-client-id")? };
-        let role       = if extract_header(metadata, "x-role")? == "seeder" {
+        let client_id = ClientId { id: extract_header(metadata, "x-client-id")? };
+        let role = if extract_header(metadata, "x-role")? == "seeder" {
             Role::Seeder
         } else {
             Role::Leecher
