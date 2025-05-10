@@ -139,7 +139,7 @@ impl PeerConnection {
         
         //2. try connection across NAT
         {
-            let timeout_duration = Duration::from_secs(4);
+            let timeout_duration = Duration::from_secs(10);
             println!("SelfID {:?}", self.self_addr);
             let res = timeout(
                 timeout_duration, 
