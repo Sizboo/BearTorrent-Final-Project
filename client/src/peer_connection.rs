@@ -147,6 +147,7 @@ impl PeerConnection {
             
             match res {
                 Ok(_) => {
+                    println!("Seeder got hole punch notif");
                     if let Ok(socket) = self.hole_punch(peer_addr).await {
                         // println!("Returned value {:?}", socket);
                         //start quick server
@@ -238,7 +239,8 @@ impl PeerConnection {
             }
         }
 
-        {    
+        {   
+            println!("In hole punch");
             let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
             let port = peer_id.port as u16;
             let peer_addr = SocketAddr::from((ip_addr, port));

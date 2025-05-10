@@ -110,6 +110,7 @@ impl Connector for ConnectionService {
 
         match self.init_hole_punch.read().await.get(&self_id).cloned().ok_or(Status::internal("failed to get self_id")) {
             Ok(notify_handle) => {
+                println!("Seeder got its notify handle!");
                 notify_handle.notified().await;
                 Ok(Response::new(()))
             },
@@ -131,7 +132,8 @@ impl Connector for ConnectionService {
                 Err(Status::internal("no seeding peer"))?;
             }
             Some(notify_handle) => {
-               notify_handle.notify_waiters();
+                println!("Hole Punch notifier received by Leecher");
+                notify_handle.notify_waiters();
             }
         }
         
@@ -144,7 +146,7 @@ impl Connector for ConnectionService {
         request: Request<FileMessage>,
     ) -> Result<Response<ClientId>, Status> {
         let r = request.into_inner();
-        println!("advertising file: {:?}", r.info_hash);
+        // println!("advertising file: {:?}", r.info_hash);
 
         let client_id = match r.id {
             Some(id) => id,
