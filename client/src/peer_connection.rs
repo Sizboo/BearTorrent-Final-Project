@@ -182,19 +182,9 @@ impl PeerConnection {
         {
       
             // TURN for sending here
-            // let client_id = self.server.uid.clone();
-            // 
-            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx).await?;
-            // 
-            // 
-            // // TODO probably develop a better way to do the actual send over TURN...
-            // let response = self.server.client.get_client_id(peer_id).await?;
-            // let target = response.into_inner();
-            // let buf = "data sent over TURN".as_bytes().to_vec();
-            // 
-            // tokio::time::sleep(Duration::from_millis(1000)).await;
-            // fallback.send_to(target, buf).await?;
-            // println!("SEEDER fallback to TURN")
+            let client_id = self.server.uid.clone();
+
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx).await?;
         }
 
         Ok(())
@@ -283,14 +273,12 @@ impl PeerConnection {
         
         {
             // TURN for receiving here
-            // let client_id = self.server.uid.clone();
-            // 
-            // let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx.clone()).await?;
-            // 
+            let client_id = self.server.uid.clone();
+
+            let fallback = TurnFallback::start(self.server.turn.clone(), client_id, conn_tx.clone()).await?;
+
             // // TODO remove... just needed to have this to keep the program open long enough to receive data
             // tokio::time::sleep(Duration::from_secs(5)).await;
-            // 
-            // println!("REQUESTER: fallback to TURN succeeded");
         }
 
         Ok(())
