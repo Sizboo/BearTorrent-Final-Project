@@ -1,3 +1,6 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod demo;
 mod peer_connection;
 mod torrent_client;
 mod quic_p2p_sender;
@@ -15,11 +18,17 @@ use crate::connection::connection::InfoHash;
 use crate::torrent_client::TorrentClient;
 
 
+use tauri::Manager;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tauri::command]
+async fn say_hello() -> String {
+    println!("say_hello() was called!");
+    "Hello from Rust!".to_string()
+}
 
-    rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider()).expect("cannot install default provider");
+#[tauri::command]
+async fn start_seeding() -> Result<(), String> {
+    println!("Seeding...");
 
     let mut torrent_client = TorrentClient::new().await?;
 
@@ -39,48 +48,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 client_clone.seeding().await.unwrap();
             });
 
-            seeding.await.expect("seeding broken");
-        }
-        "r" => {
-            input.clear();
-            println!("Requesting");
-            //todo will need have a requesting process like seeding above
-            
-            let files = torrent_client.get_server_files().await?;
-            
-            let mut file_selection: HashMap<u16, InfoHash> = HashMap::new();
-            
-            let mut i :u16 = 0;
-            
-            println!("Num of files: {}", files.len());
-            
-            for file in files {
-                println!("Option: {} -> File: {}", i, file.name);
-                file_selection.insert(i, file);
-                i += 1;
-            }
-            
-            println!("\n\n type a number for your selection:");
-           
-            std::io::stdout().flush();
-            std::io::stdin().read_line(&mut input)?;
-            let command: u16 = input.trim().parse().expect("Invalid number");
-            
-            let file_requested = file_selection.remove(&command).unwrap();
-            println!("You Requested: {}", file_requested.name);
-            
-            torrent_client.file_request(file_requested).await?;
-            
-            
+    Ok(())
+}
 
-        }
-        _ => {
-            println!("Unknown command: {}", command);
-        }
+#[tauri::command]
+async fn start_requesting() -> Result<(), String> {
+    println!("Requesting...");
 
+    let mut server_conn = ServerConnection::new()
+        .await
+        .map_err(|e| format!("Failed to connect: {:?}", e))?;
+
+    let mut torrent_client = TorrentClient::new(&mut server_conn)
+        .await
+        .map_err(|e| format!("Failed to create client: {:?}", e))?;
+
+    if let Some(uid) = server_conn.uid {
+        let _ = server_conn.register_server_connection(torrent_client.self_addr);
+
+        let file_hash = 1234;
+        let mut peer_list = torrent_client
+            .file_request(uid, file_hash)
+            .await
+            .map_err(|e| format!("Failed to request file: {:?}", e))?;
+
+        if let Some(peer) = peer_list.list.pop() {
+            torrent_client
+                .get_file_from_peer(peer)
+                .await
+                .map_err(|e| format!("File download failed: {:?}", e))?;
+        } else {
+            return Err("No peers available".to_string());
+        }
+    } else {
+        return Err("UID missing".to_string());
     }
 
-
     Ok(())
+}
 
+fn main() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            say_hello,
+            start_seeding,
+            start_requesting
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Tauri application");
 }

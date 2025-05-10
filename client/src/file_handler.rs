@@ -365,7 +365,7 @@ pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], connection::
             results.insert(temp_infohash.get_hashed_info_hash(), temp_infohash);
         }
     }
-    
+
     // Return the list of hashes
     Ok(results)
 

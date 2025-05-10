@@ -136,13 +136,13 @@ impl QuicP2PConn {
             endpoint,
         })
     }
-    
+
     pub(crate) async fn quic_listener(
         &mut self,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>
     ) -> Result<(), Box<dyn std::error::Error>> {
         let conn_listener = self.endpoint.accept().await.ok_or("failed to accept")?;
-        
+
         //establish timeout duration to exit if connection request is not received
         let timeout_duration = Duration::from_secs(4);
 
@@ -151,9 +151,9 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-               
+
                 QuicP2PConn::send_data(conn, file_map).await?;
-                
+
                 Ok(())
             },
             Err(e) => {
@@ -161,7 +161,7 @@ impl QuicP2PConn {
             }
         }
     }
-    
+
     async fn send_data(
         conn: Connection,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
@@ -170,7 +170,7 @@ impl QuicP2PConn {
         loop {
             let (mut send, mut recv) = conn.accept_bi().await?;
             println!("Seeder accepted bi stream!");
-        
+
             let mut req_buf : [u8; 37] = [0; 37];
             recv.read_exact(&mut req_buf).await?;
             println!("Client received req {:?}", req_buf);
@@ -216,24 +216,24 @@ impl QuicP2PConn {
 
         // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
         let timeout_duration = Duration::from_secs(4);
-        
+
         let res = timeout(timeout_duration,self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?).await?;
-        
+
         match res {
             Ok(conn) => {
-                
+
                 QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await?;
-            
-                Ok(()) 
+
+                Ok(())
             }
             Err(e) => {
                 return Err(Box::new(e));
             }
-            
+
         }
-        
+
     }
-    
+
     async fn recv_data(
         conn: Connection,
         conn_tx: Sender<Message>,
@@ -243,12 +243,12 @@ impl QuicP2PConn {
 
         loop {
             if let Some(msg) = conn_rx.lock().await.recv().await {
-                
+
                 let (mut send, mut recv) = conn.open_bi().await?;
                 println!("requester opened bi stream!");
-                let conn_tx_clone = conn_tx.clone(); 
-                
-                
+                let conn_tx_clone = conn_tx.clone();
+
+
                 let (index, length) = match msg {
                     Message::Request { index,length,.. } => (index, length),
                     _ => Err("length not found")?,
@@ -273,7 +273,7 @@ impl QuicP2PConn {
                 send.finish()?;
                 println!("sent message requesting: {}", index);
 
-                let res = ret.await?; 
+                let res = ret.await?;
                 if res.is_err() {
                     eprintln!("{:?}", res);
                 }

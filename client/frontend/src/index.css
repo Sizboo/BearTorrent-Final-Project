@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    background: linear-gradient(to bottom right, #1e293b, #334155);
+    font-family: 'Inter', sans-serif;
+}
+
+button {
+    @apply rounded-md px-4 py-2 shadow hover:scale-105 transition-transform duration-150;
+}

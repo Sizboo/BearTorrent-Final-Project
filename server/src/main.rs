@@ -98,10 +98,10 @@ impl Connector for ConnectionService {
 
         Ok(Response::new(peer_id))
     }
-    
+
     /// await_trigger_hole_punch() should be used by the sending peer (ie the peer with the data)
-    /// and awaited to initiate its hole punch sequence. 
-    /// When this method returns, it indicates the requesting client is beginning its hole punch sequence. 
+    /// and awaited to initiate its hole punch sequence.
+    /// When this method returns, it indicates the requesting client is beginning its hole punch sequence.
     async fn await_hole_punch_trigger(
         &self,
         request: Request<PeerId>,
@@ -116,17 +116,17 @@ impl Connector for ConnectionService {
             },
             Err(e) => Err(Status::internal(e.to_string())),
         }
-        
+
     }
-    
+
     /// init_hole_punch() is used to notify a seeding peer that they should begin the udp hole punching procedure.
     /// This function should be called right before the calling peer initiates their own hole punching procedure
     /// as UDP hole punching is time-sensitive.
     async fn init_punch(&self, request: Request<PeerId>) -> Result<Response<()>, Status> {
-       
+
         let peer_id = request.into_inner();
-  
-        
+
+
         match self.init_hole_punch.read().await.get(&peer_id) {
             None => {
                 Err(Status::internal("no seeding peer"))?;
@@ -136,7 +136,7 @@ impl Connector for ConnectionService {
                 send_handle.send(true).map_err(|e| Status::internal(e.to_string()))?;
             }
         }
-        
+
         Ok(Response::new(()))
     }
 
@@ -155,7 +155,7 @@ impl Connector for ConnectionService {
 
         let (tx, rx) = mpsc::channel(1);
 
-        
+
         if let Some(info_hash) = r.info_hash {
             let mut file_tracker = self.file_tracker.lock().await;
             file_tracker.entry(info_hash).or_default().push(client_id.clone());
@@ -198,21 +198,21 @@ impl Connector for ConnectionService {
         Ok(Response::new(uid ))
     }
 
-    
+
     /// update_registered_peer_id() is used to update the peer id of a client that has been registered
     /// this is used when a client changes their ip address
     async fn update_registered_peer_id(&self, request: Request<FullId>) -> Result<Response<ClientId>, Status> {
-    
+
         let r = request.into_inner();
         let self_id = r.self_id.ok_or(Status::invalid_argument("self id not provided"))?;
         let peer_id = r.peer_id.ok_or(Status::invalid_argument("peer id not provided"))?;
-        
+
         self.client_registry.write().await.insert(self_id.clone(), Some(peer_id));
 
         self.init_hole_punch.write().await.insert(peer_id,watch::channel(false));
-        
+
         Ok(Response::new(self_id))
-    
+
     }
 
     /// init_cert_sender() must be called before a quic connection can be established
@@ -235,7 +235,7 @@ impl Connector for ConnectionService {
 
         Ok(Response::new(()))
     }
-    
+
     /// get_cer() is used by the client end of the quic connection to get the server's self-signed certificate
     /// it should be called and waited upon once init_cert_sender() has been called
     /// get_cert() SHOULD NOT be called unless init_cert_sender() has completed
@@ -301,20 +301,20 @@ impl Connector for ConnectionService {
 
         Ok(Response::new(client_id))
     }
-    
+
     async fn get_all_files(
         &self,
         request: Request<()>
     ) -> Result<Response<FileList>, Status> {
-        
+
         let info_hashes = self.file_tracker.lock().await.keys().map(|x| x.clone()).collect::<Vec<_>>();
-        
+
         Ok(Response::new(
             FileList {
                 info_hashes,
             }
         ))
-        
+
     }
 }
 

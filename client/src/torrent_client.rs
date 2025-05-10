@@ -37,7 +37,7 @@ impl TorrentClient {
 
         let mut client = connector_client::ConnectorClient::new(endpoint.clone());
         let turn = turn_client::TurnClient::new(endpoint);
-        
+
         let uid = client.register_client(ClientRegistry { peer_id: None} ).await?;
         let uid = uid.into_inner();
 
@@ -110,23 +110,23 @@ impl TorrentClient {
                 priv_socket: Some(priv_socket),
                 self_addr,
             },
-        ) 
+        )
     }
     async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
-        
+
         let mut server_conn = self.client.clone();
-        
-        
+
+
         match server_conn.update_registered_peer_id(
-            FullId { 
-                self_id: Option::from(self.uid.clone()), 
+            FullId {
+                self_id: Option::from(self.uid.clone()),
                 peer_id: Some(self_addr)
             }
         ).await {
             Ok(res) => Ok(()),
             Err(e) => Err(Box::new(e) as Box<dyn std::error::Error>),
         }
-        
+
     }
 
     ///seeding is used as a listening process to begin sending data upon request
@@ -182,7 +182,7 @@ impl TorrentClient {
             let request_rx = assembler.subscribe_new_connection();
             let peer_id = peer_list[i];
             let handle = tokio::spawn(async move {
-                
+
                 let res = peer_connection.requester_connection(peer_id,conn_tx, request_rx).await;
                 if res.is_err() {
                     eprintln!("connection error: {}", res.err().unwrap());
