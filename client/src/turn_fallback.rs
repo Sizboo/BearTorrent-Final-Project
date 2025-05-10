@@ -15,15 +15,16 @@ impl TurnFallback {
     /// - `leecher_id`: the peer’s ClientId
     pub async fn start_seeding(
         mut turn_client: TurnClient<tonic::transport::Channel>,
-        session_id: String,
         seeder_id: ClientId,
         leecher_id: ClientId,
     ) -> Result<Self, Status> {
+        let session_id   = make_session_id(seeder_id.uid, leecher_id.uid);
+
         // 1) Register for incoming Requests from leecher:
         let mut inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
-                client_id: Some(seeder_id.clone()),
+                client_id: leecher_id.clone(),
                 is_seeder: true,
             })
             .await?
@@ -33,11 +34,29 @@ impl TurnFallback {
         let (tx, rx) = mpsc::channel::<TurnPacket>(128);
         let outbound = ReceiverStream::new(rx);
 
+        let tx_for_requests = tx.clone();
+
         // 3) Spawn a task to receive Requests and stub‐handle them:
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
                 if let Some(Body::Request(req)) = pkt.body {
-                    // todo handle received requests
+
+                    // todo get actual values for payload and index
+                    let payload = [].to_vec();
+                    let index = 0;
+
+                    let reply = TurnPacket {
+                        session_id: session_id.clone(),
+                        target_id: leecher_id.clone(),
+                        body: Some(Body::Piece(TurnPiece {
+                            payload,
+                            index,
+                        })),
+                    };
+
+                    if let Err(e) = tx_for_requests.send(reply).await {
+                        eprintln!("failed to send piece over TURN: {}", e);
+                    }
                 }
             }
         });
@@ -56,10 +75,11 @@ impl TurnFallback {
     /// - `seeder_id`: the peer’s ClientId
     pub async fn start_leeching(
         mut turn_client: TurnClient<tonic::transport::Channel>,
-        session_id: String,
         leecher_id: ClientId,
         seeder_id: ClientId,
     ) -> Result<Self, Status> {
+        let session_id   = make_session_id(seeder_id.uid, leecher_id.uid);
+
         // 1) Register for incoming Pieces from seeder:
         let mut inbound = turn_client
             .register(RegisterRequest {
@@ -73,7 +93,10 @@ impl TurnFallback {
         // 2) Spawn a task to receive Pieces and stub‐handle them:
         tokio::spawn(async move {
             while let Some(Ok(pkt)) = inbound.next().await {
-                if let Some(Body::Piece(bytes)) = pkt.body {
+                if let Some(Body::Piece(tp)) = pkt.body {
+                    let index  = tp.index;
+                    let payload = tp.payload;
+
                     // todo handle received pieces
                 }
             }
@@ -98,4 +121,10 @@ impl TurnFallback {
             .await
             .map_err(|e| Status::unavailable(format!("failed to send TurnPacket: {}", e)))
     }
+}
+
+fn make_session_id(a: &str, b: &str) -> String {
+    let mut pair = [a, b];
+    pair.sort_unstable();
+    pair.join(":")
 }

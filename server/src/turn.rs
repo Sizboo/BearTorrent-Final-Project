@@ -53,22 +53,18 @@ impl Session {
     /// - Requests → the seeder
     /// - Pieces   → the leecher
     pub async fn forward(&self, pkt: TurnPacket) {
-        if pkt.body.is_none() {
-            return;
-        }
-
-        use crate::connection::turn_packet::Body;
-        match pkt.body.unwrap() {
-            Body::Request(_) => {
-                if let Some((_, ref tx)) = self.seeder {
+        match pkt.body {
+            Some(Body::Request(_req)) => {
+                if let Some((_, tx)) = &self.seeder {
                     let _ = tx.send(pkt).await;
                 }
             }
-            Body::Piece(_) => {
-                if let Some((_, ref tx)) = self.leecher {
+            Some(Body::Piece(_tp)) => {
+                if let Some((_, tx)) = &self.leecher {
                     let _ = tx.send(pkt).await;
                 }
             }
+            None => {}
         }
     }
 

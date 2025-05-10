@@ -71,12 +71,32 @@ message PeerList {
     repeated PeerId list = 1;
 }
 
+message RegisterRequest {
+    ClientId session_id = 1;
+    ClientId client_id  = 2;
+    bool is_seeder = 3;
+}
+
+message TurnPiece {
+    bytes payload = 1;
+    uint32 index = 2;
+}
+
+message PieceRequest {
+    InfoHash hash = 1;
+    uint32 index = 2;
+}
+
 message TurnPacket {
-    ClientId client_id = 1;
+    ClientId session_id = 1;
     ClientId target_id = 2;
-    bytes payload = 3;
+    oneof body {
+        TurnPiece piece = 3;
+        TurnPieceRequest request = 4;
+    }
 }
 
 service Turn {
-    rpc Relay(stream TurnPacket) returns (stream TurnPacket);
+    rpc register(RegisterRequest) returns (stream TurnPacket);
+    rpc send(stream TurnPacket) returns (google.protobuf.Empty);
 }

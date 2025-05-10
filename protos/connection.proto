@@ -72,7 +72,7 @@ message PeerList {
 }
 
 message RegisterRequest {
-    string session_id = 1;
+    ClientId session_id = 1;
     ClientId client_id  = 2;
     bool is_seeder = 3;
 }
@@ -88,7 +88,7 @@ message PieceRequest {
 }
 
 message TurnPacket {
-    string session_id = 1;
+    ClientId session_id = 1;
     ClientId target_id = 2;
     oneof body {
         TurnPiece piece = 3;
