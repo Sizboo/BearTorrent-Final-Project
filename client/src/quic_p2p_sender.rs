@@ -151,6 +151,10 @@ impl QuicP2PConn {
         println!("Seeder accepted quic connection");
         loop {
             tokio::select! {
+                _ = conn.closed() => {
+                    println!("Connection closed");
+                    return Ok(());
+                },
                 stream = conn.accept_bi() => {
                     let (mut send, mut recv) = stream?;
                     println!("Seeder accepted bi stream!");
@@ -182,10 +186,6 @@ impl QuicP2PConn {
                     send.write_all(msg).await?;
                     send.finish()?;
                     println!("Seeder sent piece of length {:?}", len);
-                }
-                _ = conn.closed() => {
-                    println!("Connection closed");
-                    return Ok(());
                 }
             }
         }
