@@ -75,9 +75,8 @@ impl FileAssembler {
     
     async fn reassemble_loop(mut conn_rx: mpsc::Receiver<Message>, info_hash: InfoHash)
         -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let num_pieces = info_hash.pieces.len();
         
-        for _  in 0.. num_pieces {
+        loop {
            let msg = conn_rx.recv().await.ok_or("failed to get message")?;
            
            let (index, piece) = match msg {
@@ -88,6 +87,10 @@ impl FileAssembler {
            println!("Received Piece: {}", index);
            write_piece_to_part(info_hash.clone(), piece, index)?;
            println!("Successfully Wrote: {}", index);
+            
+            if file_handler::is_file_complete(info_hash.clone()) {
+                break;
+            }
         }
         
         file_handler::build_file(info_hash)

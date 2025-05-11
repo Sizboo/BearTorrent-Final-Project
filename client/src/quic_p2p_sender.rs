@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tonic::Request;
-use crate::file_handler::{read_piece_from_file };
+use crate::file_handler::{read_piece_from_file};
 
 pub struct QuicP2PConn {
     endpoint: Endpoint,
