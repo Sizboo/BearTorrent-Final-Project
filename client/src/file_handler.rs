@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions, rename, remove_file};
 use sha1::{Sha1, Digest};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
-use std::iter::Map;
 use std::path::{Path, PathBuf};
 use crate::connection::*;
 
@@ -197,7 +196,7 @@ fn get_file(file_name: String) -> PathBuf {
 }
 
 // Create the files directory if it doesn't exist
-fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
+fn get_client_files_dir() -> std::io::Result<PathBuf> {
     let dir = Path::new("resources/files");
     if !dir.exists(){
         create_dir_all(dir)?;
@@ -206,7 +205,7 @@ fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
 }
 
 // Create the cache directory for .part and .info files if it doesn't exist
-fn get_client_cache_dir() -> std::io::Result<(PathBuf)> {
+fn get_client_cache_dir() -> std::io::Result<PathBuf> {
     let dir = Path::new("resources/cache");
     if !dir.exists(){
         create_dir_all(dir)?;

@@ -16,15 +16,7 @@ use std::io::Write;
 use peer_connection::PeerConnection;
 use crate::connection::connection::InfoHash;
 use crate::torrent_client::TorrentClient;
-
-
 use tauri::Manager;
-
-#[tauri::command]
-async fn greetings() -> String {
-    println!("greetings() was called!");
-    "Hello from Rust!".to_string()
-}
 
 #[tauri::command]
 async fn start_seeding() -> Result<(), String> {
@@ -52,13 +44,6 @@ async fn start_seeding() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn start_requesting() -> Result<(), String> {
-    println!("Starting requesting...");
-    let mut torrent_client = TorrentClient::new().await?;
-    let files = torrent_client.get;
-}
-
 fn main() {
 
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider()).expect("cannot install default provider");
@@ -74,7 +59,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             say_hello,
             start_seeding,
-            start_requesting
+            start_requesting,
+            greetings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

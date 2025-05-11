@@ -1,4 +1,3 @@
-use std::io::{Cursor, Write};
 
 #[derive(Debug, PartialEq)]
 #[repr(u8)]

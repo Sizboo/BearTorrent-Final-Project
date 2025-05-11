@@ -1,8 +1,10 @@
-import { useState } from "react";
+import {useEffect, useState} from "react";
+import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from '@tauri-apps/api/core';
 import FileTable from "./components/FileTable";
 import FileDetailSidebar from "./components/FileDetailSidebar";
+import ToggleButton from './components/ToggleButton';
 import "./index.css";
 import "./shimmer.css";
 import './modern-styles.css';
@@ -18,11 +20,36 @@ const initialFiles = [
 
 export default function App() {
     const [message, setMessage] = useState("Click to say hello...");
+    const [files, setFiles] = useState([]);
+
+
+    //Toggle Seeding
+    const handleToggle = () => {
+        setIsToggled(prev => !prev);
+
+    };
+
+    //File Updating
+    useEffect(() => {
+        const unlisten = listen("file-update", (event) => {
+            console.log("Received file-update event C0001", event.payload);
+            setFiles(event.payload); // this should be the Vec<SerializableFileInfo>
+        });
+
+        return () => {
+            unlisten.then((off) => off()); // clean up listener on unmount
+        };
+    }, []);
 
     function handleHello() {
         invoke("say_hello")
             .then(alert)
             .catch(console.error);
+    }
+
+    function handleUploadClick() {
+        handleClick();
+        handleGreetings();
     }
 
     function handleGreetings() {
@@ -48,7 +75,7 @@ export default function App() {
     const [sortField, setSortField] = useState("name");
     const [sortAsc, setSortAsc] = useState(true);
 
-    const sortedFiles = [...initialFiles].sort((a, b) => {
+    const sortedFiles = [...files].sort((a, b) => {
         const valA = a[sortField];
         const valB = b[sortField];
         if (typeof valA === "string") return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
@@ -64,8 +91,9 @@ export default function App() {
                 </h1>
                 <nav className="flex gap-6">
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Home</button>
-                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleClick}>Upload</button>
+                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleUploadClick}>Upload</button>
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleHello}>Settings</button>
+                    <ToggleButton />
                 </nav>
             </header>
 
