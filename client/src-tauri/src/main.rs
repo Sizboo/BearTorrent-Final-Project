@@ -3,7 +3,8 @@ use tauri::{Manager, Emitter};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::Mutex;
-use client::{TorrentClient, get_available_files, SerializableFileInfo};
+use client::{TorrentClient, AppState, get_available_files, SerializableFileInfo};
+
 
 
 fn main() {
@@ -26,7 +27,7 @@ fn main() {
 
             // Insert into AppState
             app.manage(AppState {
-                client: Arc::new(Mutex::new(client)),
+                client: Arc::new(RwLock::new(client)),
             });
 
             let window = app.get_webview_window("main").unwrap();
@@ -77,7 +78,7 @@ fn main() {
             demo::say_hello,
             demo::download,
             demo::say_hello_delayed,
-            demo::get_available_files(state),
+            demo::get_available_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

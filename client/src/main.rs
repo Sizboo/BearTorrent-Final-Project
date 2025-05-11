@@ -55,13 +55,4 @@ fn main() {
     //std::io::stdin().read_line(&mut input)?;
     //let command = input.trim();
 
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            say_hello,
-            start_seeding,
-            start_requesting,
-            greetings
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running Tauri application");
 }
