@@ -214,7 +214,6 @@ impl QuicP2PConn {
         conn_rx: Arc<Mutex<Receiver<Message>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
 
-        // TODO pass off data to data handler... seems like it isn't looping thru data yet.. do that first
         let timeout_duration = Duration::from_secs(4);
 
         let res = timeout(timeout_duration,self.endpoint.connect(peer_addr, &*peer_addr.ip().to_string())?).await?;

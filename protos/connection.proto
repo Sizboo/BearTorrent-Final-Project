@@ -18,6 +18,7 @@ service Connector {
     rpc get_all_files (google.protobuf.Empty) returns (FileList);
 }
 
+
 message Cert {
     bytes certificate = 1;
 }
@@ -71,12 +72,30 @@ message PeerList {
     repeated PeerId list = 1;
 }
 
+message RegisterRequest {
+    string session_id = 1;
+    bool is_seeder = 2;
+}
+
+message TurnPiece {
+    bytes payload = 1;
+    uint32 index = 2;
+}
+
+message TurnPieceRequest {
+    bytes hash = 1;
+    uint32 index = 2;
+}
+
 message TurnPacket {
-    ClientId client_id = 1;
-    ClientId target_id = 2;
-    bytes payload = 3;
+    string session_id = 1;
+    oneof body {
+        TurnPiece piece = 2;
+        TurnPieceRequest request = 3;
+    }
 }
 
 service Turn {
-    rpc Relay(stream TurnPacket) returns (stream TurnPacket);
+    rpc register(RegisterRequest) returns (stream TurnPacket);
+    rpc send(stream TurnPacket) returns (google.protobuf.Empty);
 }

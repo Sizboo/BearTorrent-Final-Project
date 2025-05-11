@@ -143,7 +143,7 @@ impl TorrentClient {
 
             // calls get_peer
             let response = server_client.seed(peer_connection.self_addr.clone()).await;
-
+            
             // waits for response from get_peer
             match response {
                 Ok(res) => {
@@ -163,13 +163,13 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&mut self, file_hash: crate::connection::connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn file_request(&mut self, file_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
         let peer_list = client.get_file_peer_list(file_hash.clone()).await?.into_inner().list;
 
         //we want to maximize connection which means either one connection per piece
-        // or one connection per peer whichever is less.
+        // or one connection per peer, whichever is less.
         let num_connections = min(peer_list.len(), file_hash.pieces.len());
         let mut assembler = FileAssembler::new(file_hash.clone()).await;
 
@@ -201,7 +201,7 @@ impl TorrentClient {
         Ok(())
     }
 
-    pub async fn advertise(&self, info_hash: crate::connection::connection::InfoHash) -> Result<ClientId, Box<dyn std::error::Error>> {
+    pub async fn advertise(&self, info_hash: InfoHash) -> Result<ClientId, Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
         //todo make hash active
