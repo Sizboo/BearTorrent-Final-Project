@@ -263,16 +263,24 @@ impl Connector for ConnectionService {
             Some(id) => id,
             None => return Err(Status::invalid_argument("peer id not returned upon signal from server"))?
         };
-        let cert_map = self.cert_sender.read().await;
-        let (cert_tx, _cert_rx) = cert_map.get(&peer_id)
-            .ok_or(Status::not_found("Cert sender not registered"))?;
         
-        let res = cert_tx.send(r.cert.unwrap()).await;
-        
-        if res.is_err() {
-            return Err(Status::internal("failed to send cert to server"))
+        for i in 0..3 {
+            match self.cert_sender.read().await.get(&peer_id) {
+                Some((cert_tx, _cert_rx)) => {
+                    cert_tx.send(r.cert.clone().unwrap()).await
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                    break;
+                }
+                None => {
+                    sleep(Duration::from_millis(250)).await;
+                    if i == 2 {
+                        return Err(Status::invalid_argument("Cert sender not registered"))?;
+                    }
+                    continue  
+                }
+            }
         }
-
+        
         Ok(Response::new(()))
     }
 
