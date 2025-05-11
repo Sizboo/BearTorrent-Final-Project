@@ -154,7 +154,7 @@ impl PeerConnection {
         //2. try connection across NAT
         {
             let timeout_duration = Duration::from_secs(5);
-            let res = timeout(timeout_duration, hole_punch_handle).await?;
+            let res = timeout(timeout_duration, hole_punch_handle).await;
 
             match res {
                 Ok(_) => {
