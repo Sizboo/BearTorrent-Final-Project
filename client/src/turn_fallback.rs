@@ -1,4 +1,4 @@
-use crate::connection::connection::{turn_client::TurnClient, ClientId, RegisterRequest, TurnPacket,
+use crate::connection::connection::{turn_client::TurnClient, PeerId, RegisterRequest, TurnPacket,
                                     turn_packet::Body, TurnPiece, TurnPieceRequest, InfoHash};
 use crate::message::Message;
 use tokio::sync::mpsc;
@@ -7,6 +7,7 @@ use tonic::Status;
 use std::sync::Arc;
 use tokio::{sync::{Mutex, RwLock}, time::{sleep, Duration}};
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use crate::file_handler::{read_piece_from_file };
 
 pub struct TurnFallback {
@@ -18,12 +19,12 @@ impl TurnFallback {
     /// function to start seeding via TURN
     pub async fn start_seeding(
         mut turn_client: TurnClient<tonic::transport::Channel>,
-        seeder_id: ClientId,
-        leecher_id: ClientId,
+        seeder_id: PeerId,
+        leecher_id: PeerId,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
     ) -> Result<(), Status> {
         println!("made it to start_seeding");
-        let session_id = make_session_id(&seeder_id.uid, &leecher_id.uid);
+        let session_id = make_session_id(&seeder_id, &leecher_id);
 
         // 1) Register for TURN as the seeder (this is a unary→stream RPC)
         let mut inbound = turn_client
@@ -45,8 +46,7 @@ impl TurnFallback {
         println!("made it past sending req");
         let md = req.metadata_mut();
         md.insert("x-session-id", session_id.parse().unwrap());
-        md.insert("x-client-id",   seeder_id.uid.parse().unwrap());
-        md.insert("x-role",        "seeder".parse().unwrap());
+        md.insert("x-role", "seeder".parse().unwrap());
         println!("made it past sending metadata");
 
         // 4) Spawn the send() future so the TURN send‐stream stays open
@@ -104,7 +104,6 @@ impl TurnFallback {
                                 // send it back over TURN
                                 let reply = TurnPacket {
                                     session_id: session_id.clone(),
-                                    target_id: Some(leecher_id.clone()),
                                     body: Some(Body::Piece(TurnPiece { payload: piece, index })),
                                 };
                                 println!("sending piece: {}", index);
@@ -137,13 +136,13 @@ impl TurnFallback {
     /// function to start leeching via TURN
     pub async fn start_leeching(
         mut turn_client: TurnClient<tonic::transport::Channel>,
-        leecher_id: ClientId,
-        seeder_id: ClientId,
+        leecher_id: PeerId,
+        seeder_id: PeerId,
         conn_tx: mpsc::Sender<Message>,
         conn_rx: Arc<Mutex<mpsc::Receiver<Message>>>,
     ) -> Result<(), Status> {
         println!("made it to start_leeching");
-        let session_id = make_session_id(&seeder_id.uid, &leecher_id.uid);
+        let session_id = make_session_id(&seeder_id, &leecher_id);
 
         // register for turn as the leecher
         let mut inbound = turn_client
@@ -210,7 +209,6 @@ impl TurnFallback {
                     if let Some(Message::Request { index, hash, .. }) = request_message {
                         let request_packet = TurnPacket {
                             session_id: session_id.clone(),
-                            target_id: Some(leecher_id.clone()),
                             body: Some(Body::Request(TurnPieceRequest {
                                 hash: hash.to_vec(),
                                 index,
@@ -230,10 +228,22 @@ impl TurnFallback {
     }
 }
 
+fn peer_to_string(peer: &PeerId) -> String {
+    // convert the u32 into a dotted-quad
+    let public_ip  = Ipv4Addr::from(peer.ipaddr);
+    let private_ip = Ipv4Addr::from(peer.priv_ipaddr);
+    // format as "publicIP:publicPort-privateIP:privatePort"
+    format!("{}:{}-{}:{}", public_ip, peer.port, private_ip, peer.priv_port)
+}
 
-/// function to join 2 ClientIds to make a string for use as a session id for turn
-fn make_session_id(a: &str, b: &str) -> String {
-    let mut pair = [a, b];
-    pair.sort_unstable();
-    pair.join(":")
+fn make_session_id(a: &PeerId, b: &PeerId) -> String {
+    // define a lexicographic key for comparison
+    let key_a = (a.ipaddr, a.port, a.priv_ipaddr, a.priv_port);
+    let key_b = (b.ipaddr, b.port, b.priv_ipaddr, b.priv_port);
+
+    // pick order so that make_session_id(a,b) == make_session_id(b,a)
+    let (first, second) = if key_a <= key_b { (a, b) } else { (b, a) };
+
+    // stringify and join with a safe separator
+    format!("{}|{}", peer_to_string(first), peer_to_string(second))
 }

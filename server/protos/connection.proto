@@ -88,10 +88,9 @@ message TurnPieceRequest {
 
 message TurnPacket {
     string session_id = 1;
-    ClientId target_id = 2;
     oneof body {
-        TurnPiece piece = 3;
-        TurnPieceRequest request = 4;
+        TurnPiece piece = 2;
+        TurnPieceRequest request = 3;
     }
 }
 
