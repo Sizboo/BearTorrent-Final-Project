@@ -17,13 +17,28 @@ const initialFiles = [
 ];
 
 export default function App() {
-
+    const [message, setMessage] = useState("Click to say hello...");
 
     function handleHello() {
         invoke("say_hello")
             .then(alert)
             .catch(console.error);
     }
+
+    function handleGreetings() {
+        invoke("greetings")
+            .then(alert)
+            .catch(console.error);
+    }
+
+    const handleClick = async () => {
+        console.log("[JS] Calling Rust async command...");
+        setMessage("Waiting for Rust...");
+        const result = await invoke("say_hello_delayed");
+        console.log("[JS] Got result from Rust:", result);
+        setMessage(result);
+    };
+
 
 
 
@@ -49,7 +64,7 @@ export default function App() {
                 </h1>
                 <nav className="flex gap-6">
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Home</button>
-                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150">Upload</button>
+                    <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleClick}>Upload</button>
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleHello}>Settings</button>
                 </nav>
             </header>
