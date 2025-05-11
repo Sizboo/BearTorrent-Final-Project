@@ -7,20 +7,20 @@ use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::connection::*;
 use crate::connector_server::{Connector, ConnectorServer};
 use crate::turn_server::TurnServer;
-use tokio::sync::{Mutex, mpsc, Notify, watch};
+use tokio::sync::{Mutex, mpsc, Notify, watch, oneshot};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use crate::turn::TurnService;
 
+
 #[derive(Debug, Default)]
 pub struct ConnectionService {
     client_registry: Arc<RwLock<HashMap<ClientId, Option<PeerId>>>>,
-    file_tracker: Arc<Mutex<HashMap<InfoHash, Vec<ClientId>>>>,
-    seed_tracker: Arc<RwLock<HashMap<PeerId, mpsc::Receiver<ClientId>>>>,
-    request_tracker: Arc<RwLock<HashMap<PeerId, mpsc::Sender<ClientId>>>>,
+    file_tracker: Arc<RwLock<HashMap<FileHash, InfoHash>>>, 
+    seeder_list: Arc<RwLock<HashMap<FileHash, Vec<ClientId>>>>,
+    seed_notifier: Arc<RwLock<HashMap<PeerId, mpsc::Sender<PeerId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
-    //todo refactor this to use a send channel
     init_hole_punch: Arc<RwLock<HashMap<PeerId, watch::Sender<bool>>>>,
 }
 
@@ -34,15 +34,13 @@ impl Connector for ConnectionService {
     /// it returns the list of peers that have the file, from the tracker map
     async fn get_file_peer_list(
         &self,
-        request: Request<InfoHash>,
+        request: Request<FileHash>,
     ) -> Result<Response<PeerList>, Status> {
         let info_hash = request.into_inner();
 
-        let mut file_tracker = self.file_tracker.lock().await;
+        let seeder_list = self.seeder_list.read().await;
 
-        // notify all seeders of the file
-
-        if let Some(clients) = file_tracker.get_mut(&info_hash) {
+        if let Some(clients) = seeder_list.get(&info_hash) {
 
             let map = self.client_registry.read().await;
             // todo maybe resolve unwarp here
@@ -55,18 +53,29 @@ impl Connector for ConnectionService {
         }
     }
 
-    async fn send_file_request(&self, request: Request<FullId>) -> Result<Response<()>, Status> {
+    async fn send_file_request(&self, request: Request<ConnectionIds>) -> Result<Response<()>, Status> {
         let r = request.into_inner();
         //this is the connection id retrieved from get_file_peer_list() of the peer seeding
-        let seeder_peer_id = r.peer_id.ok_or(Status::invalid_argument("missing peer id"))?;
+        let seeder_peer_id = r.connection_peer.ok_or(Status::invalid_argument("missing peer id"))?;
 
         //this is your own client_id so they can find your connection id
         let self_id = r.self_id.ok_or(Status::invalid_argument("missing self"))?;
 
-        let tx = self.request_tracker.write().await.remove(&seeder_peer_id)
-            .ok_or(Status::new(Code::Internal, "Failed to get peer ID from request_trackker"))?;
+        //loop through 3 times after delay.
+        //this just gives multiple attempts in case of network delay or seeding at bad times
+        for i in 0 ..3 {
+            if let Some(tx) = self.seed_notifier.write().await.remove(&seeder_peer_id) {
+                tx.send(self_id).await.map_err(|_| Status::internal("Failed to send self_id"))?;
+            } else {
+                sleep(Duration::from_millis(250)).await;
+                if i == 2 {
+                    //todo check for this error and initiate a new connection if it occurs
+                    return Err(Status::not_found("missing seeding peer"));
+                }
+                continue;
+            }
 
-        tx.send(self_id).await.map_err(|_| Status::internal("Failed to send self_id"))?;
+        }
 
         Ok(Response::new(()))
     }
@@ -76,16 +85,14 @@ impl Connector for ConnectionService {
     //todo consider renaming
     async fn seed(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
         let self_peer_id = request.into_inner();
-        let mut recv = self.seed_tracker.write().await.remove(&self_peer_id)
-            .ok_or(Status::new(Code::Internal, "No seed tracker"))?;
-
+        
+        let (peer_id_tx, mut peer_id_rx) = mpsc::channel::<PeerId>(1);
+        
+        self.seed_notifier.write().await.insert(self_peer_id, peer_id_tx);
+        
         //get id of client requesting file
-        let peer_client_id = recv.recv().await.ok_or(Status::new(Code::Internal, "Failed to receive client id"))?;
-
-        //find registered peer_id to make connection to
-        let peer_id = self.client_registry.read().await.get(&peer_client_id)
-            .ok_or(Status::new(Code::Internal, "failed to removed peer id from map"))?
-            .ok_or(Status::new(Code::Unavailable, "No peer id returned"))?;
+        let peer_id= peer_id_rx.recv().await
+            .ok_or(Status::new(Code::Internal, "Failed to receive client id"))?;
 
         Ok(Response::new(peer_id))
     }
@@ -142,29 +149,23 @@ impl Connector for ConnectionService {
         request: Request<FileMessage>,
     ) -> Result<Response<ClientId>, Status> {
         let r = request.into_inner();
-        // println!("advertising file: {:?}", r.info_hash);
 
+        let file_hash = r.hash.ok_or(Status::invalid_argument("missing file hash"))?;
+        let info_hash = r.info_hash.ok_or(Status::invalid_argument("missing info hash"))?;
+        
+        
         let client_id = match r.id {
             Some(id) => id,
             None => return Err(Status::invalid_argument("Client missing")),
         };
 
-        let (tx, rx) = mpsc::channel(1);
-
+        self.file_tracker.write().await.insert(file_hash.clone(), info_hash);
         
-        if let Some(info_hash) = r.info_hash {
-            let mut file_tracker = self.file_tracker.lock().await;
-            file_tracker.entry(info_hash).or_default().push(client_id.clone());
-        } else {
-            Err(Status::invalid_argument("info_hash missing"))?
-        }
-        let self_conn_id = self.client_registry.read().await.get(&client_id)
-            .ok_or(Status::internal("could not read from client_registry"))?
-            .ok_or(Status::invalid_argument("client_id missing"))?;
-
-        self.seed_tracker.write().await.insert(self_conn_id.clone(), rx);
-        self.request_tracker.write().await.insert(self_conn_id, tx);
-
+        self.seeder_list.write().await
+            .entry(file_hash)
+            .or_insert_with(Vec::new)
+            .push(client_id.clone());
+        
         Ok( Response::new(client_id) )
     }
 
@@ -298,10 +299,13 @@ impl Connector for ConnectionService {
     
     async fn get_all_files(
         &self,
-        request: Request<()>
+        _request: Request<()>
     ) -> Result<Response<FileList>, Status> {
         
-        let info_hashes = self.file_tracker.lock().await.keys().map(|x| x.clone()).collect::<Vec<_>>();
+        let info_hashes = self.file_tracker.read().await
+            .iter()
+            // get all the values (1) in the map
+            .map(|x| x.1.clone()).collect::<Vec<_>>();
         
         Ok(Response::new(
             FileList {

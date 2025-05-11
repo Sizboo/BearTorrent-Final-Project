@@ -3,8 +3,8 @@ import "google/protobuf/empty.proto";
 package connection;
 
 service Connector {
-    rpc get_file_peer_list (InfoHash) returns (PeerList);
-    rpc send_file_request (FullId) returns (google.protobuf.Empty);
+    rpc get_file_peer_list (FileHash) returns (PeerList);
+    rpc send_file_request (ConnectionIds) returns (google.protobuf.Empty);
     rpc seed (PeerId) returns (PeerId);
     rpc await_hole_punch_trigger (PeerId) returns (google.protobuf.Empty);
     rpc init_punch (PeerId) returns (google.protobuf.Empty);
@@ -47,9 +47,19 @@ message FullId {
     PeerId peer_id = 2;
 }
 
+message ConnectionIds {
+    PeerId connection_peer = 1;
+    PeerId self_id = 2;
+}
+
+message FileHash {
+    bytes hash = 1;
+}
+
 message FileMessage {
     ClientId id = 1;
-    InfoHash info_hash = 2;
+    FileHash hash = 2;
+    InfoHash info_hash = 3;
 }
 
 message FileList {

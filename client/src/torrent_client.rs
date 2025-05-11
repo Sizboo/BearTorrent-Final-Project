@@ -9,7 +9,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use tonic::Request;
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FileMessage, FullId, PeerId, InfoHash};
+use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FileMessage, FullId, PeerId, InfoHash, FileHash};
 use crate::file_assembler::FileAssembler;
 use crate::file_handler::{get_info_hashes};
 use crate::peer_connection::PeerConnection;
@@ -166,7 +166,9 @@ impl TorrentClient {
     pub async fn file_request(&mut self, file_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
-        let peer_list = client.get_file_peer_list(file_hash.clone()).await?.into_inner().list;
+        let peer_list = client.get_file_peer_list(
+            FileHash {hash: Vec::from(file_hash.get_hashed_info_hash())}
+        ).await?.into_inner().list;
 
         //we want to maximize connection which means either one connection per piece
         // or one connection per peer, whichever is less.
@@ -203,10 +205,13 @@ impl TorrentClient {
 
     pub async fn advertise(&self, info_hash: InfoHash) -> Result<ClientId, Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
-
+        
+        let file_hash = FileHash { hash: Vec::from(info_hash.get_hashed_info_hash())};
+        
         //todo make hash active
         let request = Request::new(FileMessage {
             id: Some(self.uid.clone()),
+            hash: Some(file_hash),
             info_hash: Some(info_hash),
         });
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 use tonic::{Response, Status};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::torrent_client::TorrentClient;
-use crate::connection::connection::{PeerId, FullId, ClientId};
+use crate::connection::connection::{PeerId, FullId, ClientId, ConnectionIds};
 use tokio_util::sync::CancellationToken;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
@@ -205,9 +205,9 @@ impl PeerConnection {
         
         //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();
-        server_connection.send_file_request(FullId {
-            self_id: Some(self.server.uid.clone()),
-            peer_id: Some(peer_id.clone()),
+        server_connection.send_file_request(ConnectionIds {
+            connection_peer: Some(peer_id.clone()),
+            self_id: Some(self.self_addr)
         }).await?;
         
         
