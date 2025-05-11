@@ -209,7 +209,7 @@ impl PeerConnection {
             connection_peer: Some(peer_id.clone()),
             self_id: Some(self.self_addr)
         }).await?;
-        
+        println!("peer to send {:?}", peer_id);
         
         server_connection.init_cert_sender(self.self_addr).await?;
 

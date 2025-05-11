@@ -142,6 +142,7 @@ impl TorrentClient {
             self.advertise_all().await?;
 
             // calls get_peer
+            println!("Seeding with {:?}", peer_connection.self_addr);
             let response = server_client.seed(peer_connection.self_addr.clone()).await;
             
             // waits for response from get_peer
@@ -195,7 +196,6 @@ impl TorrentClient {
 
         //begin assemble task
         assembler.send_requests(num_connections, file_hash).await?;
-
         for handle in connection_handles {
             handle.await?;
         }
