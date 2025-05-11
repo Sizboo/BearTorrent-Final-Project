@@ -174,7 +174,7 @@ impl TorrentClient {
         //we want to maximize connection which means either one connection per piece
         // or one connection per peer, whichever is less.
         let num_connections = min(peer_list.len(), file_hash.pieces.len());
-        let mut assembler = FileAssembler::new(file_hash.clone()).await;
+        let mut assembler =FileAssembler::new(file_hash.clone()).await;
 
         let mut connection_handles = Vec::new();
         //spawn the correct number of connections
@@ -182,7 +182,7 @@ impl TorrentClient {
             let mut peer_connection = self.register_new_connection().await?;
 
             let conn_tx = assembler.get_conn_tx();
-            let request_rx = assembler.subscribe_new_connection();
+            let request_rx = assembler.subscribe_new_connection().await;
             let peer_id = peer_list[i];
             let handle = tokio::spawn(async move {
                 
@@ -193,7 +193,8 @@ impl TorrentClient {
             });
             connection_handles.push(handle);
         }
-
+        
+   
         //begin assemble task
         assembler.send_requests(num_connections, file_hash).await?;
         for handle in connection_handles {

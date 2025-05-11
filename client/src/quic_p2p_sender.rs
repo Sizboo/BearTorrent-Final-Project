@@ -23,24 +23,6 @@ pub struct QuicP2PConn {
 
 impl QuicP2PConn {
 
-    /// init_for_certificate enables a quic client to receive the server's self-signed certificate
-    /// this must be called before a client can retrieve a certificate and make a quic connection
-    /// the sooner this is called the better.
-    /// By convention, the receiving peer is the client and will ideally call this prior to hole punching
-    // pub(crate) async fn init_for_certificate(
-    //     self,
-    //     self_addr: PeerId,
-    //     server: TorrentClient,
-    // ) {
-    //     let mut server_connection = server.client.clone();
-    // 
-    //     let request = Request::new(self_addr);
-    // 
-    //     let res = server_connection.init_cert_sender(request).await;
-    //     println!("Client init certificate {:?}", res);
-    //     eprintln!("Response from init for certificate {:?}", res)
-    // }
-    // 
     pub(crate) async fn create_quic_server(
         socket: TokioUdpSocket,
         peer_id: PeerId,
