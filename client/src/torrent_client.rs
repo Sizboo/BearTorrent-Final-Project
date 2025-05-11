@@ -143,7 +143,9 @@ impl TorrentClient {
 
             // calls get_peer
             let response = server_client.seed(peer_connection.self_addr.clone()).await;
-
+            
+            // let server_client = server_client.clone();
+            
             // waits for response from get_peer
             match response {
                 Ok(res) => {
