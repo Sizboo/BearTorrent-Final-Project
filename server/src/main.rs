@@ -66,6 +66,7 @@ impl Connector for ConnectionService {
         for i in 0 ..3 {
             if let Some(tx) = self.seed_notifier.write().await.remove(&seeder_peer_id) {
                 tx.send(self_id).await.map_err(|_| Status::internal("Failed to send self_id"))?;
+                break;
             } else {
                 sleep(Duration::from_millis(250)).await;
                 if i == 2 {
