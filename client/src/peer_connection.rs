@@ -105,17 +105,22 @@ impl PeerConnection {
 
 
     pub async fn seeder_connection(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
+
+        let mut server_connection = self.server.client.clone();
+        let hole_punch_handle = server_connection.await_hole_punch_trigger(self.self_addr.clone());
+
+
         let peer_id = res.into_inner();
         let pub_ip_addr = Ipv4Addr::from(peer_id.ipaddr);
         let pub_port = peer_id.port as u16;
         let peer_addr = SocketAddr::from((pub_ip_addr, pub_port));
 
-
         // create a PeerConnection and get the receiver
 
         println!("peer to send {:?}", peer_id);
 
-        //1. try connection over local NAT
+
+        // 1. try connection over local NAT
         if self.self_addr.ipaddr == peer_id.ipaddr {
             //start quick server
             let socket = self.priv_socket.take().unwrap();
@@ -141,12 +146,8 @@ impl PeerConnection {
 
         //2. try connection across NAT
         {
-            let timeout_duration = Duration::from_secs(10);
-            println!("SelfID {:?}", self.self_addr);
-            let res = timeout(
-                timeout_duration,
-                self.server.client.await_hole_punch_trigger(self.self_addr.clone() )
-            ).await?;
+            let timeout_duration = Duration::from_secs(5);
+            let res = timeout(timeout_duration, hole_punch_handle).await?;
 
             match res {
                 Ok(_) => {
@@ -193,7 +194,7 @@ impl PeerConnection {
 
 
     ///Used when client is requesting a file
-    pub async fn requester_connection(&mut self, peer_id: PeerId, conn_tx: mpsc::Sender<Message>, mut request_rx:  mpsc::Receiver<Message> ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn requester_connection(&mut self, peer_id: PeerId, conn_tx: mpsc::Sender<Message>, request_rx:  mpsc::Receiver<Message> ) -> Result<(), Box<dyn std::error::Error>> {
         
         //init the map so cert can be retrieved
         let mut server_connection = self.server.client.clone();

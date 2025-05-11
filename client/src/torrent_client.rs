@@ -143,7 +143,9 @@ impl TorrentClient {
 
             // calls get_peer
             let response = server_client.seed(peer_connection.self_addr.clone()).await;
-
+            
+            // let server_client = server_client.clone();
+            
             // waits for response from get_peer
             match response {
                 Ok(res) => {
@@ -163,7 +165,7 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&mut self, file_hash: crate::connection::connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn file_request(&mut self, file_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
         let peer_list = client.get_file_peer_list(file_hash.clone()).await?.into_inner().list;

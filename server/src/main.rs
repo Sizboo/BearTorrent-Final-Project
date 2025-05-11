@@ -2,12 +2,14 @@ mod turn;
 mod connection;
 
 use std::{env, collections::HashMap, sync::Arc};
+use std::time::Duration;
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::connection::*;
 use crate::connector_server::{Connector, ConnectorServer};
 use crate::turn_server::TurnServer;
 use tokio::sync::{Mutex, mpsc, Notify, watch};
 use tokio::sync::RwLock;
+use tokio::time::timeout;
 use uuid::Uuid;
 use crate::turn::TurnService;
 
@@ -19,7 +21,7 @@ pub struct ConnectionService {
     request_tracker: Arc<RwLock<HashMap<PeerId, mpsc::Sender<ClientId>>>>,
     cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
     //todo refactor this to use a send channel
-    init_hole_punch: Arc<RwLock<HashMap<PeerId,(watch::Sender<bool>, watch::Receiver<bool>)>>>,
+    init_hole_punch: Arc<RwLock<HashMap<PeerId, watch::Sender<bool>>>>,
 }
 
 impl ConnectionService {
@@ -97,14 +99,13 @@ impl Connector for ConnectionService {
     ) -> Result<Response<()>, Status> {
         let self_id = request.into_inner();
 
-        match self.init_hole_punch.read().await.get(&self_id).cloned().ok_or(Status::internal("failed to get self_id")) {
-            Ok((_,mut recv)) => {
-                println!("Seeder got its notify handle!");
-                recv.changed().await.map_err(|_| Status::new(Code::Internal, "failed to get self_id"))?;
-                Ok(Response::new(()))
-            },
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
+        let (watch_tx, mut watch_rx) = watch::channel(false);
+
+        self.init_hole_punch.write().await.insert(self_id, watch_tx);
+
+        watch_rx.changed().await.map_err(|e| Status::new(Code::Internal, e.to_string()))?;
+        
+        Ok(Response::new(()))
         
     }
     
@@ -116,13 +117,13 @@ impl Connector for ConnectionService {
         let peer_id = request.into_inner();
   
         
-        match self.init_hole_punch.read().await.get(&peer_id) {
+        match self.init_hole_punch.write().await.remove(&peer_id) {
+            Some(notify_handle) => {
+                println!("Hole Punch notifier received by Leecher");
+                notify_handle.send(true).map_err(|e| Status::internal(e.to_string()))?;
+            },
             None => {
                 Err(Status::internal("no seeding peer"))?;
-            }
-            Some((send_handle,_)) => {
-                println!("Hole Punch notifier received by Leecher");
-                send_handle.send(true).map_err(|e| Status::internal(e.to_string()))?;
             }
         }
         
@@ -198,8 +199,6 @@ impl Connector for ConnectionService {
         
         self.client_registry.write().await.insert(self_id.clone(), Some(peer_id));
 
-        self.init_hole_punch.write().await.insert(peer_id,watch::channel(false));
-        
         Ok(Response::new(self_id))
     
     }
