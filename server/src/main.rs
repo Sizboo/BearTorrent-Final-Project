@@ -117,7 +117,7 @@ impl Connector for ConnectionService {
         let peer_id = request.into_inner();
   
         for i in 0..3 {
-            match self.init_hole_punch.write().await.remove(&peer_id) {
+            match self.init_hole_punch.read().await.get(&peer_id) {
                 Some(notify_handle) => {
                     println!("Hole Punch notifier received by Leecher");
                     notify_handle.send(true).map_err(|e| Status::internal(e.to_string()))?;
