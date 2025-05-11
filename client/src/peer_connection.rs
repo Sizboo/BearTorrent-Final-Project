@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use tokio::{net::UdpSocket, sync::mpsc};
 use std::sync::Arc;
 use std::time::Duration;
-use tonic::{Response};
+use tonic::{Response, Status};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::torrent_client::TorrentClient;
 use crate::connection::connection::{PeerId, FullId, ClientId};
@@ -192,7 +192,7 @@ impl PeerConnection {
         {
             println!("Trying to seed over TURN...");
             // TURN for sending here
-            TurnFallback::start_seeding(self.server.turn.clone(), self.self_addr, peer_id, self.server.file_hashes.clone()).await;
+            TurnFallback::start_seeding(self.server.turn.clone(), self.self_addr, peer_id, self.server.file_hashes.clone()).await?;
         }
 
         Ok(())
@@ -251,30 +251,34 @@ impl PeerConnection {
 
             //initiate hole punch routine with other peer
             println!("PeerId {:?}", peer_id);
-            server_connection.init_punch(peer_id).await?;
+            let res = server_connection.init_punch(peer_id).await;
 
             sleep(Duration::from_millis(250)).await;
+            match res {
+                Ok(_) => {
+                    if let Ok(socket) = self.hole_punch(peer_addr).await {
+                        let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
+                        let port = peer_id.port as u16;
+                        let peer_addr = SocketAddr::from((ip_addr, port));
 
-            if let Ok(socket) = self.hole_punch(peer_addr).await {
-                let ip_addr = Ipv4Addr::from(peer_id.ipaddr);
-                let port = peer_id.port as u16;
-                let peer_addr = SocketAddr::from((ip_addr, port));
+                        let mut p2p_conn = QuicP2PConn::create_quic_client(
+                            socket,
+                            self.self_addr,
+                            self.server.clone(),
+                        ).await?;
 
-                let mut p2p_conn = QuicP2PConn::create_quic_client(
-                    socket,
-                    self.self_addr,
-                    self.server.clone(),
-                ).await?;
-
-                match p2p_conn.connect_to_peer_server(peer_addr, conn_tx.clone(), conn_rx.clone()).await {
-                    Ok(()) => {
-                        println!("REQUESTER: successful connection across NAT");
-                        return Ok(())
-                    },
-                    Err(_) => {
-                        println!("REQUESTER: connect across NAT failed");
-                    }
-                }
+                        match p2p_conn.connect_to_peer_server(peer_addr, conn_tx.clone(), conn_rx.clone()).await {
+                            Ok(()) => {
+                                println ! ("REQUESTER: successful connection across NAT");
+                                return Ok(())
+                            },
+                            Err(_) => {
+                                println ! ("REQUESTER: connect across NAT failed");
+                            }
+                        }
+                    } 
+                },
+                Err(e) => {println!("REQUESTER: Connection across NAT failed\n {:?}", e);},
             }
         }
             
