@@ -107,6 +107,13 @@ impl PeerConnection {
     pub async fn seeder_connection(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
         
         let mut server_connection = self.server.client.clone();
+        
+        
+        //I had to do some digging here because I wanted to call this immediately and await it later
+        //so that it could send a request to the server before the other peer does.
+        //This returns a future to the output known as a "hot future."
+        //So it sends a server request immediately like a want and blocking waits for the response when I call .await
+        //in case you were curious
         let hole_punch_handle = server_connection.await_hole_punch_trigger(self.self_addr.clone());
         
         

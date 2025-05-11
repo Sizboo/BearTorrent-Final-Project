@@ -9,7 +9,7 @@ use crate::connector_server::{Connector, ConnectorServer};
 use crate::turn_server::TurnServer;
 use tokio::sync::{Mutex, mpsc, Notify, watch};
 use tokio::sync::RwLock;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use crate::turn::TurnService;
 
@@ -116,14 +116,20 @@ impl Connector for ConnectionService {
        
         let peer_id = request.into_inner();
   
-        
-        match self.init_hole_punch.write().await.remove(&peer_id) {
-            Some(notify_handle) => {
-                println!("Hole Punch notifier received by Leecher");
-                notify_handle.send(true).map_err(|e| Status::internal(e.to_string()))?;
-            },
-            None => {
-                Err(Status::internal("no seeding peer"))?;
+        for i in 0..3 {
+            match self.init_hole_punch.write().await.remove(&peer_id) {
+                Some(notify_handle) => {
+                    println!("Hole Punch notifier received by Leecher");
+                    notify_handle.send(true).map_err(|e| Status::internal(e.to_string()))?;
+                    break;
+                },
+                None => {
+                    Err(Status::internal("no seeding peer"))?;
+                    sleep(Duration::from_millis(250)).await;
+                    if i == 2 {
+                        return Err(Status::invalid_argument("invalid peer id"))?;
+                    }
+                }
             }
         }
         
