@@ -211,7 +211,7 @@ impl PeerConnection {
         }).await?;
         println!("peer to send {:?}", peer_id);
         
-        server_connection.init_cert_sender(self.self_addr).await?;
+        // server_connection.init_cert_sender(self.self_addr).await?;
 
 
         let conn_rx = Arc::new(Mutex::new(request_rx));

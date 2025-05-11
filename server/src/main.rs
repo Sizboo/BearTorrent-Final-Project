@@ -3,6 +3,7 @@ mod connection;
 
 use std::{env, collections::HashMap, sync::Arc};
 use std::time::Duration;
+use dashmap::DashMap;
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::connection::*;
 use crate::connector_server::{Connector, ConnectorServer};
@@ -16,12 +17,12 @@ use crate::turn::TurnService;
 
 #[derive(Debug, Default)]
 pub struct ConnectionService {
-    client_registry: Arc<RwLock<HashMap<ClientId, Option<PeerId>>>>,
-    file_tracker: Arc<RwLock<HashMap<FileHash, InfoHash>>>, 
-    seeder_list: Arc<RwLock<HashMap<FileHash, Vec<ClientId>>>>,
-    seed_notifier: Arc<RwLock<HashMap<PeerId, mpsc::Sender<PeerId>>>>,
-    cert_sender: Arc<RwLock<HashMap<PeerId, (mpsc::Sender<Cert>, Option<mpsc::Receiver<Cert>>)>>>,
-    init_hole_punch: Arc<RwLock<HashMap<PeerId, watch::Sender<bool>>>>,
+    client_registry: Arc<DashMap<ClientId, Option<PeerId>>>,
+    file_tracker: Arc<DashMap<FileHash, InfoHash>>, 
+    seeder_list: Arc<DashMap<FileHash, Vec<ClientId>>>,
+    seed_notifier: Arc<DashMap<PeerId, mpsc::Sender<PeerId>>>,
+    cert_sender: Arc<DashMap<PeerId, mpsc::Sender<Cert>>>,
+    init_hole_punch: Arc<DashMap<PeerId, watch::Sender<bool>>>,
 }
 
 impl ConnectionService {
@@ -38,13 +39,11 @@ impl Connector for ConnectionService {
     ) -> Result<Response<PeerList>, Status> {
         let info_hash = request.into_inner();
 
-        let seeder_list = self.seeder_list.read().await;
+        if let Some(clients) = self.seeder_list.get(&info_hash) {
 
-        if let Some(clients) = seeder_list.get(&info_hash) {
-
-            let map = self.client_registry.read().await;
+            let client_map = self.client_registry.clone();
             // todo maybe resolve unwarp here
-            let peer_list = clients.iter().filter_map( |s| map.get(&s).cloned().unwrap()).collect();
+            let peer_list = clients.iter().filter_map( |s| client_map.get(&s)?.to_owned()).collect();
 
             Ok(Response::new(PeerList { list: peer_list }))
         } else {
@@ -63,13 +62,14 @@ impl Connector for ConnectionService {
 
         //loop through 3 times after delay.
         //this just gives multiple attempts in case of network delay or seeding at bad times
-        for i in 0 ..3 {
-            if let Some(tx) = self.seed_notifier.write().await.remove(&seeder_peer_id) {
+        for i in 0 ..5 {
+            if let Some(entry) = self.seed_notifier.remove(&seeder_peer_id) {
+                let tx = entry.1;
                 tx.send(self_id).await.map_err(|_| Status::internal("Failed to send self_id"))?;
                 break;
             } else {
                 sleep(Duration::from_millis(250)).await;
-                if i == 2 {
+                if i == 4 {
                     //todo check for this error and initiate a new connection if it occurs
                     return Err(Status::not_found("missing seeding peer"));
                 }
@@ -89,7 +89,7 @@ impl Connector for ConnectionService {
         
         let (peer_id_tx, mut peer_id_rx) = mpsc::channel::<PeerId>(1);
         
-        self.seed_notifier.write().await.insert(self_peer_id, peer_id_tx);
+        self.seed_notifier.insert(self_peer_id, peer_id_tx);
         
         //get id of client requesting file
         let peer_id= peer_id_rx.recv().await
@@ -109,7 +109,7 @@ impl Connector for ConnectionService {
 
         let (watch_tx, mut watch_rx) = watch::channel(false);
 
-        self.init_hole_punch.write().await.insert(self_id, watch_tx);
+        self.init_hole_punch.insert(self_id, watch_tx);
 
         watch_rx.changed().await.map_err(|e| Status::new(Code::Internal, e.to_string()))?;
         
@@ -124,8 +124,8 @@ impl Connector for ConnectionService {
        
         let peer_id = request.into_inner();
   
-        for i in 0..3 {
-            match self.init_hole_punch.read().await.get(&peer_id) {
+        for i in 0..5 {
+            match self.init_hole_punch.get(&peer_id) {
                 Some(notify_handle) => {
                     println!("Hole Punch notifier received by Leecher");
                     notify_handle.send(true).map_err(|e| Status::internal(e.to_string()))?;
@@ -134,7 +134,7 @@ impl Connector for ConnectionService {
                 None => {
                     Err(Status::internal("no seeding peer"))?;
                     sleep(Duration::from_millis(250)).await;
-                    if i == 2 {
+                    if i == 4 {
                         return Err(Status::invalid_argument("invalid peer id"))?;
                     }
                 }
@@ -160,9 +160,9 @@ impl Connector for ConnectionService {
             None => return Err(Status::invalid_argument("Client missing")),
         };
 
-        self.file_tracker.write().await.insert(file_hash.clone(), info_hash);
+        self.file_tracker.insert(file_hash.clone(), info_hash);
         
-        self.seeder_list.write().await
+        self.seeder_list
             .entry(file_hash)
             .or_insert_with(Vec::new)
             .push(client_id.clone());
@@ -181,7 +181,7 @@ impl Connector for ConnectionService {
             let uuid = Uuid::new_v4();
             uid = ClientId{ uid: uuid.to_string()};
             
-            if !self.client_registry.read().await.contains_key(&uid) {
+            if !self.client_registry.contains_key(&uid) {
                 break;
             }
 
@@ -191,7 +191,7 @@ impl Connector for ConnectionService {
             return Err(Status::internal("failed to generate uid"))?
         }
         
-        self.client_registry.write().await.insert(uid.clone(), request.into_inner().peer_id);
+        self.client_registry.insert(uid.clone(), request.into_inner().peer_id);
 
         Ok(Response::new(uid ))
     }
@@ -205,7 +205,7 @@ impl Connector for ConnectionService {
         let self_id = r.self_id.ok_or(Status::invalid_argument("self id not provided"))?;
         let peer_id = r.peer_id.ok_or(Status::invalid_argument("peer id not provided"))?;
         
-        self.client_registry.write().await.insert(self_id.clone(), Some(peer_id));
+        self.client_registry.insert(self_id.clone(), Some(peer_id));
 
         Ok(Response::new(self_id))
     
@@ -220,17 +220,17 @@ impl Connector for ConnectionService {
     ///
     /// Therefore, the receiving peer should call init_cert_sender prior to hole punching
     /// to ensure it can receive the server's self-signed certificate
-    async fn init_cert_sender(
-        &self,
-        request: Request<PeerId>
-    ) -> Result<Response<()>, Status> {
-        let r = request.into_inner();
-
-        let (tx, rx ) = mpsc::channel::<Cert>(1);
-        self.cert_sender.write().await.insert(r, (tx, Some(rx)));
-
-        Ok(Response::new(()))
-    }
+    // async fn init_cert_sender(
+    //     &self,
+    //     request: Request<PeerId>
+    // ) -> Result<Response<()>, Status> {
+    //     let r = request.into_inner();
+    // 
+    //     let (tx, rx ) = mpsc::channel::<Cert>(1);
+    //     self.cert_sender.insert(r, (tx, Some(rx)));
+    // 
+    //     Ok(Response::new(()))
+    // }
     
     /// get_cer() is used by the client end of the quic connection to get the server's self-signed certificate
     /// it should be called and waited upon once init_cert_sender() has been called
@@ -240,14 +240,11 @@ impl Connector for ConnectionService {
         request: Request<PeerId>
     ) -> Result<Response<Cert>, Status> {
         let self_addr = request.into_inner();
+        
+        let (cert_tx, mut cert_rx) = mpsc::channel::<Cert>(1);
 
-        let mut cert_map = self.cert_sender.write().await;
-
-        let (_cert_send, recv) = cert_map.get_mut(&self_addr).ok_or(Status::not_found("Cert sender not registered"))?;
-        let mut cert_recv = std::mem::take(recv).ok_or_else(|| Status::internal("failed to receive cert from server"))?;
-        drop(cert_map);
-
-        let cert = cert_recv.recv().await.ok_or(Status::internal("failed to receive cert from server"))?;
+        self.cert_sender.insert(self_addr, cert_tx);
+        let cert = cert_rx.recv().await.ok_or(Status::internal("failed to receive cert from server"))?;
 
         Ok(Response::new(cert))
     }
@@ -264,16 +261,17 @@ impl Connector for ConnectionService {
             None => return Err(Status::invalid_argument("peer id not returned upon signal from server"))?
         };
         
-        for i in 0..3 {
-            match self.cert_sender.read().await.get(&peer_id) {
-                Some((cert_tx, _cert_rx)) => {
+        for i in 0..5 {
+            match self.cert_sender.remove(&peer_id) {
+                Some(entry) => {
+                    let cert_tx = entry.1;
                     cert_tx.send(r.cert.clone().unwrap()).await
                     .map_err(|e| Status::internal(e.to_string()))?;
                     break;
                 }
                 None => {
                     sleep(Duration::from_millis(250)).await;
-                    if i == 2 {
+                    if i == 4 {
                         return Err(Status::invalid_argument("Cert sender not registered"))?;
                     }
                     continue  
@@ -290,11 +288,12 @@ impl Connector for ConnectionService {
     ) -> Result<Response<ClientId>, Status> {
         let peer = request.into_inner();
 
-        let registry = self.client_registry.read().await;
+        let registry = self.client_registry.clone();
 
         let client_id = registry
             .iter()
-            .find_map(|(client_id, saved_peer)| {
+            .find_map(|entry| {
+                let (client_id, saved_peer) = entry.pair(); 
                 if saved_peer.unwrap() == peer {
                     Some(client_id.clone())
                 } else {
@@ -311,10 +310,10 @@ impl Connector for ConnectionService {
         _request: Request<()>
     ) -> Result<Response<FileList>, Status> {
         
-        let info_hashes = self.file_tracker.read().await
+        let info_hashes = self.file_tracker
             .iter()
             // get all the values (1) in the map
-            .map(|x| x.1.clone()).collect::<Vec<_>>();
+            .map(|x| x.value().clone()).collect::<Vec<_>>();
         
         Ok(Response::new(
             FileList {
