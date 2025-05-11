@@ -163,7 +163,7 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&mut self, file_hash: crate::connection::connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn file_request(&mut self, file_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
         let peer_list = client.get_file_peer_list(file_hash.clone()).await?.into_inner().list;
