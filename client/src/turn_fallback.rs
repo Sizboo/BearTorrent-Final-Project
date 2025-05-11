@@ -29,7 +29,6 @@ impl TurnFallback {
         let mut inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
-                client_id: Some(leecher_id.clone()),
                 is_seeder: true,
             })
             .await?
@@ -105,8 +104,8 @@ impl TurnFallback {
                                 // send it back over TURN
                                 let reply = TurnPacket {
                                     session_id: session_id.clone(),
-                                    target_id:  Some(leecher_id.clone()),
-                                    body:        Some(Body::Piece(TurnPiece { payload: piece, index })),
+                                    target_id: Some(leecher_id.clone()),
+                                    body: Some(Body::Piece(TurnPiece { payload: piece, index })),
                                 };
                                 println!("sending piece: {}", index);
                                 if let Err(e) = tx.send(reply).await {
@@ -150,7 +149,6 @@ impl TurnFallback {
         let mut inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
-                client_id: Some(leecher_id.clone()),
                 is_seeder: false,
             })
             .await?
@@ -171,7 +169,6 @@ impl TurnFallback {
         // attach metadata to the stream for registering with the turn service
         let md = req.metadata_mut();
         md.insert("x-session-id", session_id_clone.parse().unwrap());
-        md.insert("x-client-id",  seeder_id.uid.parse().unwrap());
         md.insert("x-role", "leecher".parse().unwrap());
 
 

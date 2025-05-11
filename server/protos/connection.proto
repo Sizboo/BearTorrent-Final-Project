@@ -73,8 +73,7 @@ message PeerList {
 
 message RegisterRequest {
     string session_id = 1;
-    ClientId client_id  = 2;
-    bool is_seeder = 3;
+    bool is_seeder = 2;
 }
 
 message TurnPiece {

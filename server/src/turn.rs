@@ -16,8 +16,8 @@ pub enum Role {
 
 /// represents a session between a leecher and seeder in the turn system
 pub struct Session {
-    seeder:  Option<(ClientId, mpsc::Sender<Result<TurnPacket, Status>>)>,
-    leecher: Option<(ClientId, mpsc::Sender<Result<TurnPacket, Status>>)>,
+    seeder:  Option<mpsc::Sender<Result<TurnPacket, Status>>>,
+    leecher: Option<mpsc::Sender<Result<TurnPacket, Status>>>,
     barrier: Arc<Barrier>,
 }
 
@@ -27,22 +27,22 @@ impl Session {
     }
 
     /// register the seeder, error if already has one
-    pub fn add_seeder(&mut self, id: ClientId, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
+    pub fn add_seeder(&mut self, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
         println!("add_seeder called");
         if self.seeder.is_some() {
             return Err(Status::resource_exhausted("Seeder already registered"));
         }
-        self.seeder = Some((id, tx));
+        self.seeder = Some(tx);
         Ok(())
     }
 
     /// register the leecher, error if already has one
-    pub fn add_leecher(&mut self, id: ClientId, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
+    pub fn add_leecher(&mut self, tx: mpsc::Sender<Result<TurnPacket, Status>>) -> Result<(), Status> {
         println!("add_leecher called");
         if self.leecher.is_some() {
             return Err(Status::resource_exhausted("Leecher already registered"));
         }
-        self.leecher = Some((id, tx));
+        self.leecher = Some(tx);
         Ok(())
     }
 
@@ -52,12 +52,12 @@ impl Session {
         println!("Forwarding TurnPacket: {:?}", pkt);
         match &pkt.body {
             Some(Body::Request(_)) => {
-                if let Some((_, tx)) = &self.seeder {
+                if let Some(tx) = &self.seeder {
                     let _ = tx.send(Ok(pkt.clone())).await;
                 }
             }
             Some(Body::Piece(_)) => {
-                if let Some((_, tx)) = &self.leecher {
+                if let Some(tx) = &self.leecher {
                     let _ = tx.send(Ok(pkt.clone())).await;
                 }
             }
@@ -92,7 +92,6 @@ impl TurnService {
     async fn register_for_session(
         &self,
         session_id: String,
-        client_id: ClientId,
         role: Role,
     ) -> Result<ReceiverStream<Result<TurnPacket, Status>>, Status> {
         println!("Registering {:?} for session: {:?}", role, &session_id);
@@ -110,8 +109,8 @@ impl TurnService {
 
         // fill the right slot
         match role {
-            Role::Seeder => session.add_seeder(client_id, tx)?,
-            Role::Leecher => session.add_leecher(client_id, tx)?,
+            Role::Seeder => session.add_seeder(tx)?,
+            Role::Leecher => session.add_leecher(tx)?,
         }
         let barrier = session.barrier.clone();
         drop(all);
@@ -120,49 +119,6 @@ impl TurnService {
         println!("Both peers registered for session {}", session_id);
 
         Ok(ReceiverStream::new(rx))
-    }
-
-    /// starts the turn relay over a session
-    fn start_relay(
-        &self,
-        mut inbound: tonic::Streaming<TurnPacket>,
-        session_id: String,
-        client_id: ClientId,
-        role: Role,
-    ) {
-        let sessions = Arc::clone(&self.sessions);
-
-        tokio::spawn({
-            // clone the shared state for the task
-            let sessions = Arc::clone(&self.sessions);
-            let session_id = session_id.clone();
-            let role = role;
-            // inbound is the tonic::Streaming<TurnPacket>
-            let mut inbound = inbound;
-
-
-            async move {
-                loop {
-                    println!("inside relay loop for {:?}", role);
-                    match inbound.next().await {
-                        Some(Ok(pkt)) => {
-                            if let Some(session) = sessions.read().await.get(&session_id) {
-                                session.forward(pkt).await;
-                            }
-                        }
-
-                        Some(Err(e)) => {
-                            eprintln!("error reading inbound TURN packet: {:?}", e);
-                            break;
-                        }
-
-                        None => {
-                            sleep(Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-            }
-        });
     }
 }
 
@@ -177,7 +133,7 @@ impl Turn for TurnService {
     ) -> Result<Response<ReceiverStream<Result<TurnPacket, Status>>>, Status> {
         let req = req.into_inner();
         let role = if req.is_seeder { Role::Seeder } else { Role::Leecher };
-        let stream = self.register_for_session(req.session_id, req.client_id.unwrap(), role).await?;
+        let stream = self.register_for_session(req.session_id, role).await?;
         Ok(Response::new(stream))
     }
 
@@ -189,7 +145,6 @@ impl Turn for TurnService {
         // unpack metadata
         let metadata = req.metadata();
         let session_id = extract_header(metadata, "x-session-id")?;
-        let client_id = ClientId { uid: extract_header(metadata, "x-client-id")? };
         let role = if extract_header(metadata, "x-role")? == "seeder" {
             Role::Seeder
         } else {
