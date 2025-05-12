@@ -34,8 +34,6 @@ impl FileAssembler {
 
         let (resend_tx, resend_rx) = mpsc::channel::<Message>(10);
 
-        // let request_txs = assembler.request_txs.clone();
-
         let assembler = Arc::new(RwLock::new(assembler));
 
         let assembler_clone = assembler.clone();
@@ -47,8 +45,9 @@ impl FileAssembler {
         });
 
         let assembler_clone = assembler.clone();
+        let hash = file_hash.get_hashed_info_hash();
         tokio::spawn(async move {
-            let res = FileAssembler::send_requests(assembler_clone, resend_rx).await;
+            let res = FileAssembler::send_requests(hash, assembler_clone, resend_rx).await;
             if res.is_err() {
                 eprintln!("Send Request Error: {:?}", res);
             }
@@ -74,13 +73,13 @@ impl FileAssembler {
     }
 
     async fn send_requests(
+        hash: [u8; 20],
         assembler: Arc<RwLock<FileAssembler>>,
         mut resend_rx: mpsc::Receiver<Message>, //used to resend requests for pieces that didn't come or are incorrect
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         //get necessary fields in an efficient manner
         let assembler_lock = assembler.read().await;
-        let hash = assembler_lock.file_hash.get_hashed_info_hash();
         let num_pieces = assembler_lock.file_hash.pieces.len();
         let num_connections = assembler_lock.num_connections;
         let piece_length = assembler_lock.file_hash.piece_length;
