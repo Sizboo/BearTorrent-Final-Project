@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use crate::connection::connection::InfoHash;
-use crate::torrent_client::TorrentClient;
+use client::connection::connection::InfoHash;
+use client::torrent_client::TorrentClient;
+use client::file_handler;
 
 
 

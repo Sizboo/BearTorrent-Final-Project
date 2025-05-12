@@ -63,35 +63,10 @@ fn main() {
                         }
 
                         // Check frequently for fast responsiveness
-                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
                     }
                 }
             });
-
-            // Async Task 2: File list refresher (every 30s)
-            let client = state.client.clone(); // clone again to avoid move conflict
-            tauri::async_runtime::spawn({
-                let window = window.clone();
-                async move {
-                    loop {
-                        let client_guard = client.read().await;
-                        match client_guard.get_server_files().await {
-                            Ok(files) => {
-                                let serializable: Vec<SerializableFileInfo> = files.into_iter().map(Into::into).collect();
-                                window
-                                    .emit("file-update", &serializable)
-                                    .unwrap_or_else(|e| eprintln!("emit failed: {}", e));
-                            }
-                            Err(e) => {
-                                eprintln!("File refresh error: {}", e);
-                            }
-                        }
-
-                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                    }
-                }
-            });
-
             Ok(())
         }).invoke_handler(tauri::generate_handler![
             say_hello,

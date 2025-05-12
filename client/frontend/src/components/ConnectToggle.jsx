@@ -12,7 +12,7 @@ export default function ConnectToggle() {
             invoke('is_connected')
                 .then((result) => setIsConnected(!!result))
                 .catch(console.error);
-        }, 1000); // check every second
+        }, 7000); // check every second
 
         return () => clearInterval(interval);
     }, []);

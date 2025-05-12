@@ -455,7 +455,7 @@ pub(crate) fn read_piece_from_file(info_hash: connection::InfoHash, piece_index:
 // This function goes through the client's resource directory
 // to generate info hashes for each file
 // Returns: Vec<InfoHash>
-pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], connection::InfoHash>> {
+pub fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], connection::InfoHash>> {
     let mut results: HashMap<[u8;20],connection::InfoHash> = HashMap::new();
 
     // Locate the Downloads/TorrentFiles/files path

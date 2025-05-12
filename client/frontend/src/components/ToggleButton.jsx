@@ -5,17 +5,12 @@ import { invoke } from '@tauri-apps/api/core';
 export default function ToggleButton() {
     const [isToggled, setIsToggled] = useState(false);
 
-    //use effect for toggling Seeding
+    // Initialize toggle state once on mount
     useEffect(() => {
-        const interval = setInterval(() => {
-            invoke('is_seeding')
-                .then((enabled) => setIsToggled(!!enabled))
-                .catch(console.error);
-        }, 1000);
-
-        return () => clearInterval(interval);
+        invoke('is_seeding')
+            .then((enabled) => setIsToggled(!!enabled))
+            .catch(console.error);
     }, []);
-
 
     const handleToggle = async () => {
         const newState = !isToggled;
