@@ -16,11 +16,9 @@ use crate::torrent_client::TorrentClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider()).expect("cannot install default provider");
 
     let mut torrent_client = TorrentClient::new().await?;
-
 
     // let server_conn_clone = server_conn.clone();
     loop {
