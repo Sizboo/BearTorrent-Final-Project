@@ -140,7 +140,7 @@ impl connection::InfoHash {
     }
 
     // Generates a vector containing 20-byte SHA1 hash of each piece from a file
-    fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize, file_length: usize) -> std::io::Result<Vec<connection::PieceHash>>{
+    fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize) -> std::io::Result<Vec<connection::PieceHash>>{
         let mut file_reader = BufReader::new(File::open(path)?);
         let mut buf = vec![0u8;piece_length];
         let mut pieces: Vec<[u8;20]> = Vec::new();
@@ -149,14 +149,12 @@ impl connection::InfoHash {
         loop {
 
             let mut bytes_read = 0; // total bytes read
-            
+
             // Read whole file
             while bytes_read < piece_length{
                 // read segments of the file as pieces
-                buf = vec![0u8;piece_length];
                 let n = file_reader.read(&mut buf[bytes_read..piece_length])?;
-                if n == 0 || buf.iter().all(|value| *value == 0) { // EOF
-                    bytes_read = 0;
+                if n == 0 { // EOF
                     break;
                 }
                 bytes_read += n;
