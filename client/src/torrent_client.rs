@@ -28,6 +28,9 @@ const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.ru
 
 impl TorrentClient {
     pub async fn new() -> Result<TorrentClient, String> {
+    ///This method creates a new torrent client, establishing a connection to our underlying gRPC server
+    /// used both as an introducer and relay.
+    pub (crate) async fn new() -> Result<TorrentClient, Box<dyn std::error::Error>> {
         //tls config
         //webki roots uses Mozilla's certificate store
         let tls = ClientTlsConfig::new()
@@ -65,6 +68,13 @@ impl TorrentClient {
             }
         )
     }
+
+    ///This method registers a new peer connection by sending the public and private ip and port numbers
+    /// so that other peers can attempt to make a peer-to-peer connection with this client.
+    async fn register_new_connection(&mut self) -> Result<PeerConnection, Box<dyn std::error::Error>> {
+        //bind port and get public facing id
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+        let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
 
 
 
@@ -104,6 +114,7 @@ impl TorrentClient {
             IpAddr::V6(_) => return Err("Cannot convert local IPv6 to u32".into()),
         };
 
+
         let priv_addr = SocketAddrV4::new(priv_ipaddr, 0);
         let priv_socket = UdpSocket::bind(priv_addr)
             .await
@@ -142,16 +153,19 @@ impl TorrentClient {
         })
     }
 
+
+    ///This method gives the server the latest peer-id (ip and port numbers) so the server can give valid
+    /// connection details to peers.
     async fn update_registered_peer_id(
         &mut self,
         self_addr: PeerId
     ) -> Result<(), String> {
         let mut server_conn = self.client.clone();
 
-        server_conn
-            .update_registered_peer_id(FullId {
-                self_id: Some(self.uid.clone()),
-                peer_id: Some(self_addr),
+        server_conn.update_registered_peer_id(
+            FullId {
+                self_id: Option::from(self.uid.clone()),
+                peer_id: Some(self_addr)
             })
             .await
             .map_err(|e| format!("Update registered peer ID failed: {}", e))?;
@@ -165,6 +179,7 @@ impl TorrentClient {
 
         loop {
             let mut peer_connection = self.register_new_connection().await?;
+
             let mut server_client = self.client.clone();
 
             //update server's list of seeder files
@@ -199,8 +214,13 @@ impl TorrentClient {
         }
     }
 
-    ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&mut self, file_hash: InfoHash) -> Result<(), String> {
+    ///this method is used to request a file from the peer.
+    /// it spins off as many connections as possible and begins the FileAssembler processes
+    /// which piece together a file from various peers.
+    pub async fn file_request(
+        &mut self,
+        file_hash: InfoHash
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
         let peer_list = client.get_file_peer_list(
@@ -221,9 +241,6 @@ impl TorrentClient {
 
             let conn_tx = assembler.read().await.get_conn_tx();
             let request_rx = assembler.write().await.subscribe_new_connection();
-
-
-
             let peer_id = peer_list[i];
             let handle = tokio::spawn(async move {
                 
@@ -239,6 +256,7 @@ impl TorrentClient {
         //begin assemble task
         assembler.write().await.start_requesting();
 
+        //wait on connections to finish
         for handle in connection_handles {
             handle.await.map_err(|e| format!("Task join error: {e}"))?;
         }
@@ -246,6 +264,9 @@ impl TorrentClient {
         Ok(())
     }
 
+    ///This method advertises a specific file to the server.
+    /// Essentially, it tells the server that this client has this file and it can
+    /// be requested by other peers.
     pub async fn advertise(
         &self,
         info_hash: InfoHash
@@ -269,14 +290,18 @@ impl TorrentClient {
         Ok(resp.into_inner())
     }
 
+    ///This method loops through all files stored locally and advertises them to the server to be requested.
     async fn advertise_all(&self) -> Result<(), String> {
         let my_hashes = self.file_hashes.read().await.clone().into_values();
+
         for hash in my_hashes {
             self.advertise(hash).await?;
         }
+
         Ok(())
     }
 
+    ///This methods gets all the files currently being advertised by connected peers to the server.
     pub async fn get_server_files(&self) -> Result<Vec<InfoHash>, String> {
         let mut server_connection = self.client.clone();
 
@@ -287,6 +312,8 @@ impl TorrentClient {
 
     }
 
+    ///This method deletes a file from the local system and delists it from the server so peers do not
+    /// request to receive a file from this peer.
     pub async fn delete_file(
         &self,
         file_hash: InfoHash
@@ -307,6 +334,7 @@ impl TorrentClient {
 
 
     pub async fn remove_client(&self) -> Result<(), String> {
+    ///This method delists a client entirely from the server so that no peer may try making a request to this client.
         let mut server_connection = self.client.clone();
 
         server_connection.delist_client(self.uid.clone()).await;

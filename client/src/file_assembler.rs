@@ -1,9 +1,7 @@
-use std::ptr::hash;
 use std::sync::Arc;
 use crate::connection::connection::{InfoHash};
 use crate::message::Message;
 use tokio::sync::{mpsc, Notify, RwLock};
-use tonic::Request;
 use crate::{file_handler};
 use crate::file_handler::{hash_piece_data, write_piece_to_part};
 

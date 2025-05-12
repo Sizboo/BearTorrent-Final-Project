@@ -1,18 +1,10 @@
 use std::collections::HashMap;
-use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions, rename, remove_file, copy};
+use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions, rename, remove_file};
 use sha1::{Sha1, Digest};
-use std::io::{read_to_string, BufReader, Read, Seek, SeekFrom, Write};
-use std::iter::Map;
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use crate::connection::*;
-use hex::encode;
-// #[derive(Debug, Clone)]
-// pub struct InfoHash{
-//     pub(crate) name: String, // Name of the file
-//     file_length: u64, // Size of the file in bytes
-//     piece_length: u32, // Number of bytes per piece
-//     pub(crate) pieces: Vec<[u8;20]>, // hash list of the pieces
-// }
+
 
 // Represents the status of the piece download inside a vector.
 // This vector represents the status of each piece, and whether
@@ -26,15 +18,15 @@ pub struct Status{
 impl Status{
 
     // Converts the status array to a vector of bools for easy use as needed
-    pub fn to_bool_vec(&self) -> Vec<bool>{
-        let mut bool_vec: Vec<bool> = vec![];
-        // Convert non-zero to true, and zero to false
-        for value in self.pieces_status.iter() {
-            bool_vec.push(*value != 0);
-        }
-        bool_vec
-    }
-
+    // pub fn to_bool_vec(&self) -> Vec<bool>{
+    //     let mut bool_vec: Vec<bool> = vec![];
+    //     // Convert non-zero to true, and zero to false
+    //     for value in self.pieces_status.iter() {
+    //         bool_vec.push(*value != 0);
+    //     }
+    //     bool_vec
+    // }
+    //
     // Checks whether all the pieces have been assembled
     pub fn has_all_pieces(&self) -> bool {
         if self.pieces_status.is_empty(){
@@ -218,10 +210,9 @@ fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::
     Ok((temp_file_path, !is_new))
 }
 
-
 // Get the .part of the specified file
 fn get_part_file(file_name: String) -> PathBuf {
-    let (path, is_new) = get_temp_file(file_name, ".part".to_string(), "cache".to_string()).unwrap();
+    let (path, _is_new) = get_temp_file(file_name, ".part".to_string(), "cache".to_string()).unwrap();
     path
 }
 
@@ -239,7 +230,7 @@ fn get_file_cache(file_name: String) -> (PathBuf, bool) {
 
 // Gets the actual file
 fn get_file(file_name: String) -> PathBuf {
-    let (path, is_new) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
+    let (path, _is_new) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
     path
 }
 
@@ -251,7 +242,6 @@ fn get_client_files_dir() -> std::io::Result<PathBuf> {
     }
     Ok(dir)
 }
-
 
 // Create the cache directory for .part and .info files if it doesn't exist
 fn get_client_cache_dir() -> std::io::Result<PathBuf> {
@@ -267,10 +257,10 @@ fn get_client_cache_dir() -> std::io::Result<PathBuf> {
 // If they don't exist, they are created.
 fn verify_client_dir_setup() -> () {
     // Create the cache directory for .part and .info files
-    let cache = get_client_cache_dir();
+    let _cache = get_client_cache_dir();
 
     // Create the files directory if it doesn't exist
-    let dir = get_client_files_dir();
+    let _dir = get_client_files_dir();
 }
 
 // Returns the Status struct that represents the status of the file download
@@ -349,25 +339,18 @@ pub(crate) fn delete_file(file_name: String) -> std::io::Result<()> {
 }
 
 // Copies a file from the frontend to the resource directory, given a direct path
-pub(crate) fn add_file(path: String) -> std::io::Result<()> {
-    let file_path = Path::new(&path);
-    let file_name = file_path.file_name().unwrap();
-
-    let dest_folder = dirs::download_dir()
-        .unwrap()
-        .join("TorrentFiles")
-        .join("files");
-
-    // Ensure the destination folder exists
-    create_dir_all(&dest_folder)?;
-
-    let dest = dest_folder.join(file_name);
-
-    println!("Copying file into: {:?}", dest);
-    copy(file_path, dest)?;
-
-    Ok(())
-}
+// pub(crate) fn add_file(path: String) -> std::io::Result<()> {
+//     let file_path = Path::new(&path);
+//     let dest_folder = Path::new("resources/files");
+//     let dest = dest_folder.join(file_path.file_name().unwrap());
+//
+//     println!("Copying file into: {:?}", dest);
+//     match copy(file_path, dest){
+//         Ok(_) => Ok(()),
+//         Err(e) => Err(e),
+//     }
+//
+// }
 
 // If the file can be completed, the .info cache file is removed and the .part
 // file moves to Downloads/TorrentFiles removing the extension
@@ -416,7 +399,7 @@ pub(crate) fn is_file_complete(info_hash: connection::InfoHash) -> bool {
 // This function writes a piece to a .part file
 pub(crate) fn write_piece_to_part(info_hash: connection::InfoHash, piece: Vec<u8>, piece_index: u32) -> std::io::Result<()> {
     // Verify cache directory exists
-    let dir = get_client_cache_dir()?;
+    let _dir = get_client_cache_dir()?;
 
     // Creates the .part file if it doesn't exist, returns PathBuf of this file
     let part_path = get_part_file(info_hash.name.clone());
@@ -438,7 +421,7 @@ pub(crate) fn write_piece_to_part(info_hash: connection::InfoHash, piece: Vec<u8
     info_status.pieces_status[piece_index as usize] = 1u8; // Sets piece at index to true
 
     // Get the .info file and seek to the byte that represents this piece, set it to true
-    let (info_file_path, is_new_info) = get_info_file(info_hash.name);
+    let (info_file_path, _is_new_info) = get_info_file(info_hash.name);
     let mut info_file = OpenOptions::new().write(true).open(&info_file_path)?;
     info_file.seek(SeekFrom::Start(piece_index as u64))?;
     info_file.write(&[1u8])?;
