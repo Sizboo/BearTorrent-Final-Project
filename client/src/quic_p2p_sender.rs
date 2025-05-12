@@ -23,6 +23,16 @@ pub struct QuicP2PConn {
 
 impl QuicP2PConn {
 
+    ///create_quic_server
+    /// 
+    /// parameters:
+    ///    - TokioUdpSocket: resembles the socket to consume in the connection
+    ///    - peer_id: resembles the peer to accept connections from
+    ///    - server: the connection to introducer server to send certificate
+    ///    - cert_ip: the ip to build the certificate off (self ip)
+    /// 
+    /// function:
+    /// This creates a quinn server endpoint to accept a quic connection.
     pub(crate) async fn create_quic_server(
         socket: TokioUdpSocket,
         peer_id: PeerId,
@@ -79,6 +89,15 @@ impl QuicP2PConn {
         )
     }
 
+    ///create_quic_client
+    /// 
+    /// parameters:
+    ///    - TokioUdpSocket: resembles the socket to consume in the connection
+    ///    - self_addr: holds data of own connection ips
+    ///    - server: the connection to introducer server to get certificate from
+    /// 
+    /// function:
+    /// This creates a quinn client endpoint to create a quic connection.
     pub (crate) async fn create_quic_client (
         socket: TokioUdpSocket,
         self_addr: PeerId,
@@ -119,6 +138,14 @@ impl QuicP2PConn {
         })
     }
     
+    ///quic_listener
+    /// 
+    /// parameters:
+    ///    - file_map: this is the map used to get file information when it is requested by peer
+    /// 
+    /// function:
+    /// This method listens for a connection request, spawning off the send_data task when a connection
+    /// is successfully made. it times out after 4 seconds if no connection request is made. 
     pub(crate) async fn quic_listener(
         &mut self,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>
@@ -148,6 +175,16 @@ impl QuicP2PConn {
         }
     }
     
+    ///send_data()
+    /// 
+    /// parameters:
+    ///    - file_map: this is the file map from which file information is acquired when file
+    ///                is requested.
+    /// 
+    /// function:
+    /// This method waits for incoming streams. It then takes the requests from the peer and then send
+    /// the requested piece. If the piece is not available, it will respond with a Cancel request indicating
+    /// the peer should ask another peer for the data. 
     async fn send_data(
         conn: Connection,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
@@ -208,6 +245,7 @@ impl QuicP2PConn {
 
     }
 
+    ///connect_to_peer_server
     pub(crate) async fn connect_to_peer_server(
         &mut self,
         peer_addr: SocketAddr,
