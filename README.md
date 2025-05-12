@@ -45,6 +45,11 @@ The core of your project should, ideally, be written in Rust. Depending on the p
 - Use rust version 1.86.0 (what we used)
 - Make sure protoc (Protocol Buffers compiler) is installed. We used this to generate proto files for use with gRPC via Tonic.
 	- Run a command such as '''sudo pacman -S protobuf''' (or whatever package manager you use.)
+ - 
+## FRONTEND 
+Install Tauri Into Client/
+Npm run build inside Client/frontend
+cargo tauri dev inside Client/
 
 ## Questions
 - What is your project?
