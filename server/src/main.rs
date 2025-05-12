@@ -363,6 +363,9 @@ impl Connector for ConnectionService {
             self.seeder_list.iter_mut()
                 .for_each(|mut entry| {
                     entry.value_mut().retain(|id| *id != client_id);
+                    if entry.value().is_empty() {
+                        self.file_tracker.remove(entry.key());
+                    }
                 });
         }
 

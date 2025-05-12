@@ -6,7 +6,7 @@ use std::sync::Arc;
 use local_ip_address::local_ip;
 use stunclient::StunClient;
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tonic::Request;
 use tonic::transport::{Channel, ClientTlsConfig};
 use crate::connection::connection::*;
@@ -20,7 +20,8 @@ pub struct TorrentClient {
     pub(crate) client: connector_client::ConnectorClient<Channel>,
     pub(crate) turn: turn_client::TurnClient<Channel>,
     pub(crate) uid: ClientId,
-    pub(crate) file_hashes: Arc<RwLock<HashMap<[u8;20], InfoHash>>>
+    pub(crate) file_hashes: Arc<RwLock<HashMap<[u8;20], InfoHash>>>,
+    close_down: Arc<Notify>,
 }
 
 const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
@@ -53,6 +54,7 @@ impl TorrentClient {
                 turn,
                 uid,
                 file_hashes: Arc::new(RwLock::new(file_hashes)),
+                close_down: Arc::new(Notify::new()),
             }
         )
     }
@@ -147,21 +149,28 @@ impl TorrentClient {
 
             // calls get_peer
             println!("Seeding with {:?}", peer_connection.self_addr);
-            let response = server_client.seed(peer_connection.self_addr.clone()).await;
             
-            // waits for response from get_peer
-            match response {
-                Ok(res) => {
-                    tokio::spawn(async move {
-                        let res = peer_connection.seeder_connection(res).await;
-                        if res.is_err() {
-                            println!("Connect Failed: {}", res.err().unwrap());
-                        }
-                    });
-
+            tokio::select! {
+                _ = self.close_down.notified() => {
+                    println!("Shutting down");
+                    return Ok(());
                 }
-                Err(e) => {
-                    eprintln!("Failed to get peer: {:?}", e);
+                response = server_client.seed(peer_connection.self_addr.clone()) => {
+                    // waits for response from get_peer
+                    match response {
+                        Ok(res) => {
+                            tokio::spawn(async move {
+                                let res = peer_connection.seeder_connection(res).await;
+                                if res.is_err() {
+                                    println!("Connect Failed: {}", res.err().unwrap());
+                                }
+                            });
+
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get peer: {:?}", e);
+                        }
+                    }
                 }
             }
         }
@@ -273,6 +282,7 @@ impl TorrentClient {
         let mut server_connection = self.client.clone();
         
         server_connection.delist_client(self.uid.clone()).await?;
+        self.close_down.notify_waiters();
         
         Ok(())
     }
