@@ -19,10 +19,10 @@ use crate::turn_fallback::TurnFallback;
 
 #[derive(Debug, Clone)]
 pub struct TorrentClient {
-    pub(crate) client: connector_client::ConnectorClient<Channel>,
-    pub(crate) turn: turn_client::TurnClient<Channel>,
-    pub(crate) uid: ClientId,
-    pub(crate) file_hashes: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
+    pub client: connector_client::ConnectorClient<Channel>,
+    pub turn: turn_client::TurnClient<Channel>,
+    pub uid: ClientId,
+    pub file_hashes: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
     close_down: Arc<Notify>,
 }
 
@@ -67,6 +67,11 @@ impl TorrentClient {
             }
         )
     }
+
+    pub fn is_connected(&self) -> bool {
+        !self.uid.uid.is_empty()
+    }
+
 
     async fn register_new_connection(&mut self) -> Result<PeerConnection, String> {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")

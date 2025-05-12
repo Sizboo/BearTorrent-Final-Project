@@ -1,23 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Stack } from '@mui/material';
 import { invoke } from '@tauri-apps/api/core';
 
 export default function ConnectToggle() {
-    // 🟢 Define state at the top
-    const [isConnected, setIsConnected] = useState(true);
+    const [isConnected, setIsConnected] = useState(false); // default to false initially
     const [isSeeding, setIsSeeding] = useState(false);
+
+    // ✅ Sync with backend when component mounts
+    useEffect(() => {
+        invoke('is_connected')
+            .then((result) => {
+                console.log('Backend says connected?', result);
+                setIsConnected(!!result);
+            })
+            .catch((err) => {
+                console.error('Failed to check connection status:', err);
+            });
+    }, []);
 
     const handleConnectToggle = async () => {
         try {
             if (!isConnected) {
                 await invoke('connect');
-                console.log('Connected to server.');
                 setIsConnected(true);
             } else {
                 await invoke('disconnect');
-                console.log('Disconnected from server.');
                 setIsConnected(false);
-                setIsSeeding(false); // stop seeding if we disconnect
+                setIsSeeding(false);
             }
         } catch (err) {
             console.error('Connection toggle failed:', err);
@@ -28,7 +37,7 @@ export default function ConnectToggle() {
         <Stack direction="row" spacing={2}>
             <Button
                 variant={isConnected ? 'contained' : 'outlined'}
-                color={isConnected ? 'primary' : 'inherit'}
+                color={isConnected ? 'success' : 'error'} // should be red when disconnected
                 onClick={handleConnectToggle}
             >
                 {isConnected ? 'Disconnect' : 'Connect'}

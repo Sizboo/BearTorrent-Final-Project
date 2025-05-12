@@ -110,3 +110,12 @@ pub async fn reconnect(state: tauri::State<'_, AppState>) -> Result<(), String> 
     *client = new_client;
     Ok(())
 }
+
+
+#[tauri::command]
+pub async fn is_connected(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let client = state.client.read().await;
+    Ok(client.is_connected())
+}
+
+
