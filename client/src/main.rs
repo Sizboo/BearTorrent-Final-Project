@@ -65,6 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 std::io::stdout().flush();
                 std::io::stdin().read_line(&mut input)?;
+                
+                match input.trim() {
+                    "q" => continue,
+                    _ => {},
+                }
+                
                 let command: u16 = input.trim().parse().expect("Invalid number");
 
                 let file_requested = file_selection.remove(&command).unwrap();
