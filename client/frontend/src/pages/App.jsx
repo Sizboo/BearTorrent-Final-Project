@@ -44,15 +44,20 @@ export default function App() {
     }, []);
 
     function refreshFiles() {
+        setLoading(true);
         invoke("get_available_files")
             .then((result) => {
                 console.log("Refreshed files:", result);
-                setFiles(result); // assuming the result is a list of file info objects
+                setFiles(result);
             })
             .catch((err) => {
                 console.error("Failed to refresh files:", err);
+            })
+            .finally(() => {
+                setLoading(false);
             });
     }
+
 
 
     function handleHello() {
@@ -88,6 +93,8 @@ export default function App() {
     const [selected, setSelected] = useState(null);
     const [sortField, setSortField] = useState("name");
     const [sortAsc, setSortAsc] = useState(true);
+    const [loading, setLoading] = useState(false);
+
 
     const sortedFiles = [...files].sort((a, b) => {
         const valA = a[sortField];
@@ -118,11 +125,19 @@ export default function App() {
                 <div className="w-2/3 p-4 overflow-y-auto border-r border-slate-600">
                     <div className="flex justify-end mb-4">
                         <button
-                            className="menu-button rounded-lg px-4 py-2 bg-blue-500 text-white hover:bg-blue-600 transition-all duration-150"
+                            className="menu-button rounded-lg px-4 py-2 bg-blue-500 text-white hover:bg-blue-600 transition-all duration-150 flex items-center gap-2"
                             onClick={refreshFiles}
+                            disabled={loading}
                         >
-                            Refresh
+                            {loading && (
+                                <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l4-4-4-4v4a10 10 0 00-10 10h4z" />
+                                </svg>
+                            )}
+                            {loading ? "Refreshing..." : "Refresh"}
                         </button>
+
                     </div>
 
                     {sortedFiles.length === 0 ? (

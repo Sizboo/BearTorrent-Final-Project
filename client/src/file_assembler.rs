@@ -208,87 +208,54 @@ impl FileAssembler {
 
 
         loop {
-           let msg = conn_rx.recv().await.ok_or("failed to get message")?;
-           
-           match msg {
-               Message::Piece { index,  piece } => {
-                   println!("Received Piece: {}", index);
-
-                   //We want to verify the piece was not corrupted across transport.
-                   //If it was, we want to resend a request for a new piece.
-                   if  piece.len() == piece_length as usize {
-                       let recvd_piece_hash = hash_piece_data(piece.clone());
-
-                       let expected_hash: [u8; 20] = info_hash.pieces
-                           .get(index as usize)
-                           .cloned()
-                           .ok_or("Could not retrieve piece hash".to_string())?
-                           .hash
-                           .try_into()
-                           .map_err(|_| "Could not convert piece hash".to_string())?;
-
-                       if recvd_piece_hash != expected_hash {
-                           println!("Piece corrupted, sending resend request");
-                           resend_tx
-                               .send(Message::Piece { index, piece })
-                               .await
-                               .map_err(|e| e.to_string())?;
-                           continue;
-                       }
-                   }
-
-                   write_piece_to_part(info_hash.clone(), piece, index)?;
-                   println!("Successfully Wrote: {}", index);
             let msg = conn_rx.recv().await.ok_or("failed to get message")?;
 
             match msg {
-                Message::Piece { index, piece  } => {
+                Message::Piece { index,  piece } => {
                     println!("Received Piece: {}", index);
+
                     //We want to verify the piece was not corrupted across transport.
                     //If it was, we want to resend a request for a new piece.
-                    let recvd_piece_hash = hash_piece_data(piece.clone());
-                    let expected_hash: [u8; 20] = info_hash.pieces
-                        .get(index as usize)
-                        .cloned()
-                        .ok_or("Could not retrieve piece hash".to_string())?
-                        .hash
-                        .try_into()
-                        .map_err(|_| "Could not convert piece hash".to_string())?;
+                    if  piece.len() == piece_length as usize {
+                        let recvd_piece_hash = hash_piece_data(piece.clone());
 
-                    if recvd_piece_hash != expected_hash {
-                        println!("Piece corrupted, sending resend request");
-                        resend_tx
-                            .send(Message::Piece { index, piece })
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        continue;
+                        let expected_hash: [u8; 20] = info_hash.pieces
+                            .get(index as usize)
+                            .cloned()
+                            .ok_or("Could not retrieve piece hash".to_string())?
+                            .hash
+                            .try_into()
+                            .map_err(|_| "Could not convert piece hash".to_string())?;
+
+                        if recvd_piece_hash != expected_hash {
+                            println!("Piece corrupted, sending resend request");
+                            resend_tx
+                                .send(Message::Piece { index, piece })
+                                .await
+                                .map_err(|e| e.to_string())?;
+                            continue;
+                        }
                     }
+
                     write_piece_to_part(info_hash.clone(), piece, index).map_err(|e| e.to_string())?;
+
                     println!("Successfully Wrote: {}", index);
 
-                   if file_handler::is_file_complete(info_hash.clone()) {
-                       println!("File complete!");
-                       break;
-                   }
-               },
-               Message::Cancel {seeder,index, begin, length} => {
-                   println!("Failed to get piece removing seeder and trying again");
                     if file_handler::is_file_complete(info_hash.clone()) {
+                        println!("File complete!");
                         break;
                     }
                 },
-                Message::Cancel { seeder, index, begin, length } => {
+                Message::Cancel {seeder,index, begin, length} => {
                     println!("Failed to get piece removing seeder and trying again");
-
-                    let bad_tx = assembler.write().await.request_txs
-                        .get(seeder as usize)
-                        .cloned()
-                        .ok_or_else(|| format!("Invalid seeder index: {}", seeder))?;
 
                     //if we get a cancel notification, we are going to assume this means the seeder
                     //does not or cannot provide the data. So we will remove it from seeder list
                     //and resend a request.
 
+                    let bad_tx = assembler.write().await.request_txs.remove(seeder as usize);
+                    assembler.write().await.num_connections -= 1;
+                    drop(bad_tx);
 
                     if assembler.read().await.num_connections == 0 {
                         drop(resend_tx);
@@ -307,17 +274,17 @@ impl FileAssembler {
 
         }
 
-       //drop all senders signaling end of connection
-       for request_tx in assembler.write().await.request_txs.drain(0..) {
-           drop(request_tx);
-       }
-       drop(resend_tx);
+        //drop all senders signaling end of connection
+        for request_tx in assembler.write().await.request_txs.drain(0..) {
+            drop(request_tx);
+        }
+        drop(resend_tx);
 
-       file_handler::build_file(info_hash)
-       .map_err(|e| format!("Failed to build file: {}", e))?;
-       println!("piece built");
+        file_handler::build_file(info_hash)
+            .map_err(|e| format!("Failed to build file: {}", e))?;
+        println!("piece built");
 
-       Ok(())
-   }
+        Ok(())
+    }
 
 }
