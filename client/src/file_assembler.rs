@@ -85,8 +85,7 @@ impl FileAssembler {
         let piece_length = assembler_lock.file_hash.piece_length;
         drop(assembler_lock);
 
-        println!("Req hash {:?}", hash);
-        
+
         //wait for connections to have been established to start requesting
         let notify_handle = assembler.read().await.start_requesting.clone();
         notify_handle.notified().await;

@@ -177,7 +177,6 @@ impl QuicP2PConn {
                             }
                             let (seeder, index, begin, length, hash) = request.ok_or("failed to decode request")?;
 
-                            println!("hash {:?}", hash);
                             
                             let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?;
 

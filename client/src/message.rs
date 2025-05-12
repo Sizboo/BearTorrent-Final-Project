@@ -79,7 +79,7 @@ impl Message{
                 let index = u32::from_be_bytes(buf[9..13].try_into().unwrap());
                 let begin = u32::from_be_bytes(buf[13..17].try_into().unwrap());
                 let length = u32::from_be_bytes(buf[17..21].try_into().unwrap());
-                let hash = buf[17..37].try_into().unwrap();
+                let hash = buf[21..41].try_into().unwrap();
                 Some(Message::Request{ seeder, index, begin, length, hash })
             }
             7 => {
