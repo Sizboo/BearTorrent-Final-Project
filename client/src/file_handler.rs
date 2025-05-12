@@ -194,7 +194,10 @@ impl connection::InfoHash {
         hasher.update(self.file_length.to_be_bytes());
         hasher.update(self.piece_length.to_be_bytes());
         hasher.update(self.name.as_bytes());
-        for piece in self.pieces.iter().take(self.pieces.len().saturating_sub(1)) {
+        for (i, piece) in self.pieces.iter().enumerate() {
+            if i == self.pieces.len() - 1 {
+                break;
+            }
             hasher.update(piece.hash.as_slice());
         }
 
