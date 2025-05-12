@@ -246,6 +246,11 @@ impl QuicP2PConn {
     }
 
     ///connect_to_peer_server
+    /// 
+    /// parameter: 
+    ///     - peer_addr: the is the address of the peer to connect to
+    ///     - conn_tx: this is the receiving end of the file assembler channel from which to get requests from
+    ///     - conn_rx: 
     pub(crate) async fn connect_to_peer_server(
         &mut self,
         peer_addr: SocketAddr,

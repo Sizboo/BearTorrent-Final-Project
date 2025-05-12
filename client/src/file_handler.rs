@@ -154,7 +154,7 @@ impl connection::InfoHash {
             while bytes_read < piece_length{
                 // read segments of the file as pieces
                 buf = vec![0u8;piece_length];
-                let n = file_reader.read(&mut buf[0..piece_length])?;
+                let n = file_reader.read(&mut buf[bytes_read..piece_length])?;
                 if n == 0 || buf.iter().all(|value| *value == 0) { // EOF
                     bytes_read = 0;
                     break;
