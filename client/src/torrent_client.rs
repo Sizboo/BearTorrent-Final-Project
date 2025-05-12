@@ -9,8 +9,9 @@ use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use tonic::Request;
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FileMessage, FullId, PeerId, InfoHash, FileHash};
+use crate::connection::connection::*;
 use crate::file_assembler::FileAssembler;
+use crate::file_handler;
 use crate::file_handler::{get_info_hashes};
 use crate::peer_connection::PeerConnection;
 
@@ -112,7 +113,10 @@ impl TorrentClient {
             },
         ) 
     }
-    async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+    async fn update_registered_peer_id(
+        &mut self, 
+        self_addr: PeerId
+    ) -> Result<(), Box<dyn std::error::Error>> {
         
         let mut server_conn = self.client.clone();
         
@@ -164,7 +168,10 @@ impl TorrentClient {
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&mut self, file_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn file_request(
+        &mut self, 
+        file_hash: InfoHash
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
         let peer_list = client.get_file_peer_list(
@@ -204,7 +211,10 @@ impl TorrentClient {
         Ok(())
     }
 
-    pub async fn advertise(&self, info_hash: InfoHash) -> Result<ClientId, Box<dyn std::error::Error>> {
+    pub async fn advertise(
+        &self, 
+        info_hash: InfoHash
+    ) -> Result<ClientId, Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
         
         let file_hash = FileHash { hash: Vec::from(info_hash.get_hashed_info_hash())};
@@ -239,6 +249,24 @@ impl TorrentClient {
 
         Ok(info_hashes)
 
+    }
+    
+    pub async fn delete_file(
+        &self,
+        file_hash: InfoHash
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut server_connection = self.client.clone();
+        let hash = FileHash { hash: Vec::from(file_hash.get_hashed_info_hash())};
+        let file_delete = FileDelete {
+            id: Some(self.uid.clone()),
+            hash: Some(hash),
+        };
+       
+        server_connection.delete_file(file_delete).await?;
+        
+        file_handler::delete_file(file_hash.name)?;
+        
+        Ok(())
     }
 
     /// announce is a method used update server with connection details
