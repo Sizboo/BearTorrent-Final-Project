@@ -138,7 +138,7 @@ export default function App() {
                 {/* File Details Sidebar */}
                 <AnimatePresence>
                     {selected && (
-                        <SidebarMotion
+                        <motion.div
                             key="sidebar"
                             initial={{ opacity: 0, x: 50 }}
                             animate={{ opacity: 1, x: 0 }}
@@ -147,7 +147,7 @@ export default function App() {
                             className="w-1/3 p-4 bg-white bg-opacity-10 backdrop-blur-md rounded-xl shadow-inner border border-slate-500 flex-shrink-0 h-full"
                         >
                             <FileDetailSidebar selected={selected} />
-                        </SidebarMotion>
+                        </motion.div>
                     )}
                 </AnimatePresence>
             </div>
