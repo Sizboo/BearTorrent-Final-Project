@@ -41,13 +41,24 @@ The core of your project should, ideally, be written in Rust. Depending on the p
 
 # Submission
 
+## Setup Instructions
+- Use rust version 1.86.0 (what we used)
+- Make sure protoc (Protocol Buffers compiler) is installed. We used this to generate proto files for use with gRPC via Tonic.
+	- Run a command such as '''sudo pacman -S protobuf''' (or whatever package manager you use.)
+
 ## Questions
 - What is your project?
+	- Our project is a torrent client that implements our own version of the BitTorrent protocol. It supports file sharing across networks via peer-to-peer connections.
 - What novel work did you do?
+	- We've created a program that allows for advertising local files and downloading foreign files from other peers using the client. We support different types of client connections through LAN, P2P via UDP holepunching, and TURN as a last resort. We offer high-speed downloading of large files from multiple peers at the same time.   
 - What did you learn?
+	- We learned how to connect clients across different networks, advertise local files to other clients, and download from multiple seeders. We also got experience with gRPC and gCloud-run servers, and rust of course.
 - What was challenging?
+	- Figuring out how to connect to clients on different networks was challenging, especially with the different NAT types. UDP Hole-punching was especially difficult.
 - What AI tools did you use, and what did you use them for? What were their benefits and drawbacks?
+	- We used ChatGPT to assist with concepting code and debugging errors within our program. 
 - What would you do differently next time?
+	- On the server side, we would swap out the usage of maps with a different data structure to mitigate the potential of deadlock. 
 
 ## What to submit
 - Push your working code to the main branch of your team's GitHub Repository before the deadline
