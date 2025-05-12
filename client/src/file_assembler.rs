@@ -1,9 +1,11 @@
+use std::ptr::hash;
 use std::sync::Arc;
 use crate::connection::connection::{InfoHash};
 use crate::message::Message;
 use tokio::sync::{mpsc, Notify, RwLock};
+use tonic::Request;
 use crate::{file_handler};
-use crate::file_handler::write_piece_to_part;
+use crate::file_handler::{hash_piece_data, write_piece_to_part};
 
 /// this represents a connection between 2 peers
 #[derive(Debug)]
@@ -120,8 +122,13 @@ impl FileAssembler {
                 let msg = match msg {
                     Message::Cancel {index, begin, length, .. } =>
                         Message::Request {seeder: new_seeder, index, begin, length, hash},
-                    Message::Request { index, begin, length, hash, ..} =>
-                        Message::Request {seeder: new_seeder, index, begin, length, hash},
+                    Message::Piece { index, ..} =>
+                        Message::Request {
+                            seeder: new_seeder,
+                            index, 
+                            begin: piece_length * index,
+                            length: piece_length,
+                            hash},
                     _ => continue,
                 };
 
@@ -154,6 +161,21 @@ impl FileAssembler {
            match msg {
                Message::Piece { index, piece  } => {
                    println!("Received Piece: {}", index);
+
+                   //We want to verify the piece was not corrupted across transport.
+                   //If it was, we want to resend a request for a new piece.
+                   let recvd_piece_hash = hash_piece_data(piece.clone());
+                   let expected_hash : [u8; 20] = info_hash.pieces
+                       .get(index as usize).cloned()
+                       .ok_or(Box::<dyn std::error::Error + Send + Sync>::from("Could not retrieve piece hash"))?
+                       .hash.try_into().map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("Could not convert piece hash"))?;
+
+                   if recvd_piece_hash != expected_hash {
+                       println!("Piece corrupted sending resend request");
+                       resend_tx.send(Message::Piece { index, piece }).await?;
+                       continue;
+                   }
+
                    write_piece_to_part(info_hash.clone(), piece, index)?;
                    println!("Successfully Wrote: {}", index);
 
@@ -170,6 +192,11 @@ impl FileAssembler {
 
                    assembler.write().await.request_txs.remove(seeder as usize);
                    assembler.write().await.num_connections -= 1;
+
+                   if assembler.read().await.num_connections == 0 {
+                       drop(resend_tx);
+                       return Err(Box::<dyn std::error::Error + Send + Sync>::from("Failed to Retrieve File"))
+                   }
 
                    resend_tx.send(Message::Cancel {seeder, index, begin, length}).await?;
 

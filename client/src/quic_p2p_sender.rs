@@ -246,37 +246,53 @@ impl QuicP2PConn {
         loop {
             if let Some(msg) = conn_rx.lock().await.recv().await {
                 
-                let (mut send, mut recv) = conn.open_bi().await?;
-                println!("requester opened bi stream!");
-                let conn_tx_clone = conn_tx.clone(); 
-                
-                
-                let (index, length) = match msg {
-                    Message::Request { index,length,.. } => (index, length),
-                    _ => Err("length not found")?,
-                };
+                match conn.open_bi().await {
+                    Ok((mut send, mut recv)) => {
+                        println!("requester opened bi stream!");
+                        let conn_tx_clone = conn_tx.clone();
 
-                let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
-                    tokio::spawn(async move {
-                        println!("requester waiting for length {:?}", length + 9);
-                        let buf = recv.read_to_end(length as usize + 9).await?;
-                        println!("received piece from peer");
 
-                        let msg = Message::decode(buf).ok_or("failed to decode message")?;
+                        let (index, length) = match msg {
+                            Message::Request { index,length,.. } => (index, length),
+                            _ => Err("length not found")?,
+                        };
 
-                        conn_tx_clone.send(msg).await?;
+                        let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
+                            tokio::spawn(async move {
+                                println!("requester waiting for length {:?}", length + 9);
+                                let buf = recv.read_to_end(length as usize + 9).await?;
+                                println!("received piece from peer");
 
-                        Ok(())
-                    });
+                                let msg = Message::decode(buf).ok_or("failed to decode message")?;
 
-                send.write_all(&msg.encode()).await?;
-                send.finish()?;
-                println!("sent message requesting: {}", index);
+                                conn_tx_clone.send(msg).await?;
 
-                let res = ret.await?; 
-                if res.is_err() {
-                    eprintln!("{:?}", res);
+                                Ok(())
+                            });
+
+                        send.write_all(&msg.encode()).await?;
+                        send.finish()?;
+                        println!("sent message requesting: {}", index);
+
+                        let res = ret.await?;
+                        if res.is_err() {
+                            eprintln!("{:?}", res);
+                        } 
+                    },
+                    //if connection errors, we want to resend the requests to another connection
+                    //this loops it back to file_assembler so it can handle removing this connection
+                    //and resend a new request to a viable connection
+                    Err(_) => {
+                        println!("Connection Error sending Cancel Request");
+                        let cancel_req = match msg {
+                            Message::Request { seeder, index, begin, length, .. } =>
+                                Message::Cancel { seeder, index, begin, length },
+                            _ => continue,
+                        };
+                        conn_tx.send(cancel_req).await?;
+                    } 
                 }
+                
             } else {
                 println!("connection closed");
                 conn.close(0u32.into(), b"closing connection gracefully");
