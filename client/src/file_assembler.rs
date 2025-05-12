@@ -210,25 +210,24 @@ impl FileAssembler {
            let msg = conn_rx.recv().await.ok_or("failed to get message")?;
            
            match msg {
-               Message::Piece { index, mut piece } => {
+               Message::Piece { index,  piece } => {
                    println!("Received Piece: {}", index);
 
                    //We want to verify the piece was not corrupted across transport.
                    //If it was, we want to resend a request for a new piece.
-                   if  piece.len() != piece_length as usize {
-                       piece.resize(piece_length as usize, 0);
-                   }
-                   let recvd_piece_hash = hash_piece_data(piece.clone());
-                   
-                   let expected_hash : [u8; 20] = info_hash.pieces
-                       .get(index as usize).cloned()
-                       .ok_or(Box::<dyn std::error::Error + Send + Sync>::from("Could not retrieve piece hash"))?
-                       .hash.try_into().map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("Could not convert piece hash"))?;
-                   
-                   if recvd_piece_hash != expected_hash {
-                       println!("Piece corrupted sending resend request");
-                       resend_tx.send(Message::Piece { index, piece }).await?;
-                       continue;
+                   if  piece.len() == piece_length as usize {
+                       let recvd_piece_hash = hash_piece_data(piece.clone());
+
+                       let expected_hash: [u8; 20] = info_hash.pieces
+                           .get(index as usize).cloned()
+                           .ok_or(Box::<dyn std::error::Error + Send + Sync>::from("Could not retrieve piece hash"))?
+                           .hash.try_into().map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("Could not convert piece hash"))?;
+
+                       if recvd_piece_hash != expected_hash {
+                           println!("Piece corrupted sending resend request");
+                           resend_tx.send(Message::Piece { index, piece }).await?;
+                           continue;
+                       }
                    }
 
                    write_piece_to_part(info_hash.clone(), piece, index)?;
