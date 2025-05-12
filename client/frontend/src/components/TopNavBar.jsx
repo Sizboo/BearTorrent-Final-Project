@@ -1,5 +1,6 @@
 import { AppBar, Toolbar, Button, Typography } from "@mui/material";
-import ToggleButton from "./ToggleButton"; // ✅ Adjust path based on your folder structure
+import ToggleButton from "./ToggleButton";
+import ConnectToggle from "./ConnectToggle"; // ✅ Adjust path based on your folder structure
 
 export default function TopNavBar({ activeTab, onTabChange }) {
     const tabs = ["Files", "Uploads", "Settings"];
@@ -30,8 +31,8 @@ export default function TopNavBar({ activeTab, onTabChange }) {
                         </Button>
                     ))}
 
-                    {/* ✅ Add toggle button here */}
                     <ToggleButton />
+                    <ConnectToggle/>
                 </div>
             </Toolbar>
         </AppBar>

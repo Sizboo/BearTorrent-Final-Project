@@ -1,13 +1,3 @@
-mod peer_connection;
-mod torrent_client;
-mod quic_p2p_sender;
-mod turn_fallback;
-mod connection;
-mod file_handler;
-mod piece_assembler;
-mod file_assembler;
-mod message;
-
 use std::collections::HashMap;
 use std::io::Write;
 use peer_connection::PeerConnection;
@@ -30,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::io::stdin().read_line(&mut input)?;
 
         let command = input.trim();
-        
+
         match command {
             "s" => {
                 println!("Seeding");
@@ -43,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "r" => {
                 let mut input = String::new();
-                
+
                 println!("Requesting");
                 //todo will need have a requesting process like seeding above
 
@@ -65,12 +55,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 std::io::stdout().flush();
                 std::io::stdin().read_line(&mut input)?;
-                
+
                 match input.trim() {
                     "q" => continue,
                     _ => {},
                 }
-                
+
                 let command: u16 = input.trim().parse().expect("Invalid number");
 
                 let file_requested = file_selection.remove(&command).unwrap();
@@ -80,12 +70,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "d" => {
                 let mut input = String::new();
-                
+
                 let files = file_handler::get_info_hashes()?;
-                
+
                 let mut file_selection: HashMap<u16, InfoHash> = HashMap::new();
                 let mut i: u16 = 0;
-                
+
                 for file in files {
                     println!("Option: {} -> File: {}", i, file.1.name);
                     file_selection.insert(i, file.1);
@@ -100,8 +90,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let file_requested = file_selection.remove(&command).unwrap();
                 println!("You Requested to Delete: {}", file_requested.name);
-                
-                torrent_client.delete_file(file_requested).await?; 
+
+                torrent_client.delete_file(file_requested).await?;
             }
             "exit" => {
                 torrent_client.remove_client().await?;

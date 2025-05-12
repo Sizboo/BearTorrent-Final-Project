@@ -1,19 +1,25 @@
-import { Card, CardContent, Typography, Button } from "@mui/material";
+import { Card, CardContent, Typography, Button, Stack } from "@mui/material";
 import { motion } from "framer-motion";
-import { FiDownload } from "react-icons/fi";
-import {invoke} from "@tauri-apps/api/core";
-
-
-function handleDownload(selected) {
-    if (!selected?.hash) return;
-    invoke("download", { hash: selected.hash })
-        .then(alert)
-        .catch(console.error);
-}
-
-
+import { FiDownload, FiTrash2 } from "react-icons/fi";
+import { invoke } from "@tauri-apps/api/core";
 
 export default function FileDetailSidebar({ selected }) {
+    const handleDownload = () => {
+        if (!selected?.hash) return;
+        invoke("download", { hash: selected.hash })
+            .then(() => alert(`Download started for "${selected.name}"`))
+            .catch(console.error);
+    };
+
+    const handleDelete = () => {
+        if (!selected?.hash) return;
+        if (!confirm(`Are you sure you want to delete "${selected.name}"?`)) return;
+
+        invoke("delete_file", { hash: selected.hash })
+            .then(() => alert(`Deleted "${selected.name}"`))
+            .catch(console.error);
+    };
+
     return (
         <aside style={{ position: "fixed", bottom: "24px", right: "24px", width: "360px" }}>
             <motion.div
@@ -36,20 +42,31 @@ export default function FileDetailSidebar({ selected }) {
                         {selected ? (
                             <>
                                 <Typography variant="h6" gutterBottom>{selected.name}</Typography>
-                                <Typography variant="body2">{selected.type} • {selected.size.toFixed(1)} MB</Typography>
+                                <Typography variant="body2">{selected.type} • {selected.size?.toFixed(1)} MB</Typography>
                                 <Typography variant="caption" display="block" sx={{ mt: 2 }}>
                                     Modified: {selected.lastModified}
                                 </Typography>
-                                <Button
-                                    variant="contained"
-                                    color="primary"
-                                    startIcon={<FiDownload />}
-                                    sx={{ mt: 3 }}
-                                    fullWidth
-                                    onClick={handleDownload(selected)}
-                                >
-                                    Download
-                                </Button>
+
+                                <Stack direction="column" spacing={2} sx={{ mt: 3 }}>
+                                    <Button
+                                        variant="contained"
+                                        color="primary"
+                                        startIcon={<FiDownload />}
+                                        onClick={handleDownload}
+                                        fullWidth
+                                    >
+                                        Download
+                                    </Button>
+                                    <Button
+                                        variant="outlined"
+                                        color="error"
+                                        startIcon={<FiTrash2 />}
+                                        onClick={handleDelete}
+                                        fullWidth
+                                    >
+                                        Delete
+                                    </Button>
+                                </Stack>
                             </>
                         ) : (
                             <Typography variant="body2" color="text.secondary">

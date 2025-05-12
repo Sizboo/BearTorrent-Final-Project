@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from '@tauri-apps/api/core';
 import FileTable from "../components/FileTable";
-import FileDetailSidebar from "../components/FileDetailSidebar";
+import PersonalFileDetailSidebar from "../components/PersonalFileDetailSidebar";
 import ToggleButton from '../components/ToggleButton';
 import BrowseFileButton from '../components/BrowseFileButton';
 import "../index.css";
@@ -129,7 +129,7 @@ export default function Files() {
                             transition={{ type: "spring", stiffness: 300, damping: 25 }}
                             className="w-1/3 p-4 bg-white bg-opacity-10 backdrop-blur-md rounded-xl shadow-inner border border-slate-500 flex-shrink-0 h-full"
                         >
-                            <FileDetailSidebar selected={selected} />
+                            <PersonalFileDetailSidebar selected={selected} />
                         </SidebarMotion>
                     )}
                 </AnimatePresence>

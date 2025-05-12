@@ -204,17 +204,18 @@ impl connection::InfoHash {
 // Checks if a file exists, if it doesn't then it is created.
 // Returns the PathBuf to this file
 fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::Result<(PathBuf, bool)> {
-    let temp_file_name = format!("resources/{}/{}{}", src, file_name, extension);
-    let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
-        Ok(true) => (PathBuf::from(temp_file_name), true),
-        Ok(false) => {
-            File::create(&temp_file_name)?;
-            (PathBuf::from(temp_file_name), false)
-        }
-        Err(e) => return Err(e),
-    };
-    Ok(temp_file)
+    let dir = dirs::download_dir().unwrap().join("TorrentFiles").join(src);
+    if !dir.exists() {
+        create_dir_all(&dir)?;
+    }
+    let temp_file_path = dir.join(format!("{}{}", file_name, extension));
+    let is_new = !temp_file_path.exists();
+    if is_new {
+        File::create(&temp_file_path)?;
+    }
+    Ok((temp_file_path, !is_new))
 }
+
 
 // Get the .part of the specified file
 fn get_part_file(file_name: String) -> PathBuf {
@@ -236,29 +237,32 @@ fn get_file_cache(file_name: String) -> (PathBuf, bool) {
 
 // Gets the actual file
 fn get_file(file_name: String) -> PathBuf {
-    let (path, is_new) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
+    let (path, _) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
     path
 }
 
+
 // Create the files directory if it doesn't exist
-fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
-    let dir = Path::new("resources/files");
-    if !dir.exists(){
-        create_dir_all(dir)?;
+fn get_client_files_dir() -> std::io::Result<PathBuf> {
+    let dir = dirs::download_dir().unwrap().join("TorrentFiles").join("files");
+    if !dir.exists() {
+        create_dir_all(&dir)?;
     }
-    Ok(dir.to_path_buf())
+    Ok(dir)
 }
+
 
 // Create the cache directory for .part and .info files if it doesn't exist
-fn get_client_cache_dir() -> std::io::Result<(PathBuf)> {
-    let dir = Path::new("resources/cache");
-    if !dir.exists(){
-        create_dir_all(dir)?;
+fn get_client_cache_dir() -> std::io::Result<PathBuf> {
+    let dir = dirs::download_dir().unwrap().join("TorrentFiles").join("cache");
+    if !dir.exists() {
+        create_dir_all(&dir)?;
     }
-    Ok(dir.to_path_buf())
+    Ok(dir)
 }
 
-// Checks the client for resources directory containing cache and files.
+
+// Checks the client for Torrent directory containing cache and files.
 // If they don't exist, they are created.
 fn verify_client_dir_setup() -> () {
     // Create the cache directory for .part and .info files
@@ -311,70 +315,93 @@ pub(crate) fn hash_piece_data(buf: Vec<u8>) -> [u8;20]{
     bytes.into()
 }
 
-// Deletes a file and its associated cache files from resources
+// Deletes a file and its associated cache files from Torrent
 pub(crate) fn delete_file(file_name: String) -> std::io::Result<()> {
-    let file_path = format!("resources/files/{}", file_name);
+    let file_path = dirs::download_dir()
+        .unwrap()
+        .join("TorrentFiles")
+        .join("files")
+        .join(&file_name);
+
     let (info_path, _) = get_info_file(file_name.clone());
     let part_path = get_part_file(file_name.clone());
-    let (cache_path,_) = get_file_cache(file_name);
-    if exists(Path::new(&file_path))? {
-        match remove_file(file_path){
-            Err(e) => eprintln!("{}", e),
-            _ => {}
-        };
-        match remove_file(part_path){
-            Err(e) => eprintln!("{}", e),
-            _ => {}
-        };
-        match remove_file(cache_path){
-            Err(e) => eprintln!("{}", e),
-            _ => {}
-        };
+    let (cache_path, _) = get_file_cache(file_name);
+
+    if file_path.exists() {
+        if let Err(e) = remove_file(&file_path) {
+            eprintln!("{}", e);
+        }
     }
+    if part_path.exists() {
+        if let Err(e) = remove_file(part_path) {
+            eprintln!("{}", e);
+        }
+    }
+    if cache_path.exists() {
+        if let Err(e) = remove_file(cache_path) {
+            eprintln!("{}", e);
+        }
+    }
+
     Ok(())
 }
 
 // Copies a file from the frontend to the resource directory, given a direct path
 pub(crate) fn add_file(path: String) -> std::io::Result<()> {
     let file_path = Path::new(&path);
-    let dest_folder = Path::new("resources/files");
-    let dest = dest_folder.join(file_path.file_name().unwrap());
+    let file_name = file_path.file_name().unwrap();
+
+    let dest_folder = dirs::download_dir()
+        .unwrap()
+        .join("TorrentFiles")
+        .join("files");
+
+    // Ensure the destination folder exists
+    create_dir_all(&dest_folder)?;
+
+    let dest = dest_folder.join(file_name);
 
     println!("Copying file into: {:?}", dest);
-    match copy(file_path, dest){
-        Ok(_) => Ok(()),
-        Err(e) => Err(e),
-    }
+    copy(file_path, dest)?;
 
+    Ok(())
 }
 
 // If the file can be completed, the .info cache file is removed and the .part
-// file moves to resources/files removing the extension
+// file moves to Downloads/TorrentFiles removing the extension
 pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
-    match is_file_complete(info_hash.clone()) {
-        true => {
-            // Get both cached files
-            println!("Printing: {:?}", info_hash.name.clone());
-            let part_file = get_part_file(info_hash.name.clone());
-            let (info_file, _) = get_info_file(info_hash.name.clone());
+    if is_file_complete(info_hash.clone()) {
+        // Get both cached files
+        println!("Printing: {:?}", info_hash.name.clone());
+        let part_file = get_part_file(info_hash.name.clone());
+        let (info_file, _) = get_info_file(info_hash.name.clone());
 
-            // New target file path
-            let new_file_name = format!("resources/files/{}", info_hash.name);
+        // Get Downloads/TorrentFiles/files directory
+        let downloads_dir = dirs::download_dir()
+            .ok_or("Could not find downloads directory")?
+            .join("TorrentFiles")
+            .join("files");
 
-            // Check if the file already exists to prevent overwriting
-            if exists(Path::new(&new_file_name))?{
-                return Err("File already exists in resources/files, cannot build!".into());
-            }
+        // Create the directory if it doesn't exist
+        create_dir_all(&downloads_dir)?;
 
-            // Move the .part file to resources/files
-            rename(part_file, new_file_name)?;
+        // Build the new target file path
+        let new_file_path = downloads_dir.join(&info_hash.name);
 
-            // remove the .info file
-            remove_file(info_file)?;
+        // Check if the file already exists to prevent overwriting
+        if new_file_path.exists() {
+            return Err("File already exists in Downloads/TorrentFiles/files, cannot build!".into());
+        }
 
-            Ok(())
-        },
-        false => Err("Missing pieces for file, cannot build!".into())
+        // Move the .part file to the destination
+        rename(part_file, new_file_path)?;
+
+        // Remove the .info file
+        remove_file(info_file)?;
+
+        Ok(())
+    } else {
+        Err("Missing pieces for file, cannot build!".into())
     }
 }
 
@@ -439,26 +466,32 @@ pub(crate) fn read_piece_from_file(info_hash: connection::InfoHash, piece_index:
 // This function goes through the client's resource directory
 // to generate info hashes for each file
 // Returns: Vec<InfoHash>
-pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], connection::InfoHash>> {
-    let mut results: HashMap<[u8;20],connection::InfoHash> = HashMap::new();
+/// Scans the user's Downloads/TorrentFiles/files directory and builds InfoHash records.
+pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8; 20], connection::InfoHash>> {
+    let mut results: HashMap<[u8; 20], connection::InfoHash> = HashMap::new();
 
-    // Verify resources are set up, fetch downloaded files PathBuf
-    verify_client_dir_setup();
-    let dir = get_client_files_dir()?;
+    // Locate the Downloads/TorrentFiles/files path
+    let downloads_dir = dirs::download_dir()
+        .ok_or(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find user's Downloads directory",
+        ))?
+        .join("TorrentFiles")
+        .join("files");
 
-    // For each file in "/resources", request the hash and append to results
-    for file in read_dir(dir)? {
-        let file = file?;
+    // Ensure the directory exists
+    std::fs::create_dir_all(&downloads_dir)?;
+
+    // Read and parse files
+    for entry in read_dir(&downloads_dir)? {
+        let file = entry?;
         let path = file.path();
 
-        // If the entry is a file, create InfoHash and append
         if path.is_file() {
-            let temp_infohash = connection::InfoHash::new(file)?;
-            results.insert(temp_infohash.get_hashed_info_hash(), temp_infohash);
+            let info_hash = connection::InfoHash::new(file)?;
+            results.insert(info_hash.get_hashed_info_hash(), info_hash);
         }
     }
-    
-    // Return the list of hashes
-    Ok(results)
 
+    Ok(results)
 }

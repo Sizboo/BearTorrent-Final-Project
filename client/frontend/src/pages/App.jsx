@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import FileTable from "../components/FileTable";
 import FileDetailSidebar from "../components/FileDetailSidebar";
 import ToggleButton from '../components/ToggleButton';
+import ConnectToggle from '../components/ConnectToggle';
 import "../index.css";
 import "../shimmer.css";
 import '../modern-styles.css';
@@ -28,15 +29,7 @@ export default function App() {
     const navigate = useNavigate();
     const [message, setMessage] = useState("Click to say hello...");
     const [files, setFiles] = useState([]);
-    const [isToggled, setIsToggled] = useState(false);
 
-
-
-    //Toggle Seeding
-    const handleToggle = () => {
-        setIsToggled(prev => !prev);
-
-    };
 
     //File Updating
     useEffect(() => {
@@ -49,6 +42,18 @@ export default function App() {
             unlisten.then((off) => off()); // clean up listener on unmount
         };
     }, []);
+
+    function refreshFiles() {
+        invoke("get_available_files")
+            .then((result) => {
+                console.log("Refreshed files:", result);
+                setFiles(result); // assuming the result is a list of file info objects
+            })
+            .catch((err) => {
+                console.error("Failed to refresh files:", err);
+            });
+    }
+
 
     function handleHello() {
         invoke("say_hello")
@@ -103,6 +108,7 @@ export default function App() {
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={handleUploadClick}>Upload</button>
                     <button className="menu-button rounded-lg px-4 py-2 hover:bg-blue-700 transition-all duration-150"onClick={() => navigate("/files")}>Files</button>
                     <ToggleButton />
+                    <ConnectToggle/>
                 </nav>
             </header>
 
@@ -110,6 +116,15 @@ export default function App() {
             <div className="flex flex-row flex-1 overflow-hidden">
                 {/* File Table Section */}
                 <div className="w-2/3 p-4 overflow-y-auto border-r border-slate-600">
+                    <div className="flex justify-end mb-4">
+                        <button
+                            className="menu-button rounded-lg px-4 py-2 bg-blue-500 text-white hover:bg-blue-600 transition-all duration-150"
+                            onClick={refreshFiles}
+                        >
+                            Refresh
+                        </button>
+                    </div>
+
                     {sortedFiles.length === 0 ? (
                         <div className="flex flex-col space-y-4">
                             <div className="shimmer" />
@@ -134,6 +149,7 @@ export default function App() {
                         />
                     )}
                 </div>
+
 
                 {/* File Details Sidebar */}
                 <AnimatePresence>
