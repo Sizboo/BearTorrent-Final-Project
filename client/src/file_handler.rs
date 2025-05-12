@@ -14,7 +14,9 @@ use hex::encode;
 //     pub(crate) pieces: Vec<[u8;20]>, // hash list of the pieces
 // }
 
-// Represents the status of the piece download
+// Represents the status of the piece download inside a vector.
+// This vector represents the status of each piece, and whether
+// it has been fully received or not.
 #[derive(Debug)]
 pub struct Status{
     pub(crate) pieces_status: Vec<u8> // Using u8 for simplified reading and writing
@@ -273,22 +275,23 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
     let (path, is_new) = get_info_file(info_hash.name);
     let mut info_file = OpenOptions::new().write(true).read(true).open(&path).unwrap();
     match is_new {
-        // If the .info has never been generated before, construct the file
+        // .info existed before, so we can read from it
         true => {
             let mut buffer: Vec<u8> = Vec::new();
             let mut buf = [0u8; 1];
+            // Read each u8 into the buffer
             while let Ok(n) = info_file.read(&mut buf){
                 if n == 0 {
                     break;
                 }
                 buffer.append(&mut buf.to_vec());
             }
-
+            
             Status{
                 pieces_status: buffer
             }
         }
-        // .info existed before, so we can read from it
+        // If the .info has never been generated before, construct the file
         false => {
             let pieces= vec![0u8;info_hash.pieces.len()];
             info_file.write_all(&pieces).unwrap();
@@ -311,7 +314,7 @@ pub(crate) fn hash_piece_data(buf: Vec<u8>) -> [u8;20]{
     bytes.into()
 }
 
-// Deletes a file and its associated cache files from resources
+// Deletes a file and its associated cache files from resources, if any exist
 pub(crate) fn delete_file(file_name: String) -> std::io::Result<()> {
     let file_path = format!("resources/files/{}", file_name);
     let (info_path, _) = get_info_file(file_name.clone());
@@ -327,6 +330,10 @@ pub(crate) fn delete_file(file_name: String) -> std::io::Result<()> {
             _ => {}
         };
         match remove_file(cache_path){
+            Err(e) => eprintln!("{}", e),
+            _ => {}
+        };
+        match remove_file(info_path){
             Err(e) => eprintln!("{}", e),
             _ => {}
         };
@@ -349,7 +356,7 @@ pub(crate) fn add_file(path: String) -> std::io::Result<()> {
 }
 
 // If the file can be completed, the .info cache file is removed and the .part
-// file moves to resources/files removing the extension
+// file moves to resources/files removing its extension
 pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
     match is_file_complete(info_hash.clone()) {
         true => {
