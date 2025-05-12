@@ -191,7 +191,12 @@ impl PeerConnection {
         {
             println!("Trying to seed over TURN...");
             // TURN for sending here
-            TurnFallback::start_seeding(self.server.turn.clone(), self.self_addr, peer_id, self.server.file_hashes.clone()).await?;
+            TurnFallback::start_seeding(
+                self.server.turn.clone(), 
+                self.self_addr, 
+                peer_id, 
+                self.server.file_hashes.clone()
+            ).await?;
         }
 
         Ok(())
@@ -210,9 +215,6 @@ impl PeerConnection {
         }).await?;
         println!("peer to send {:?}", peer_id);
         
-        // server_connection.init_cert_sender(self.self_addr).await?;
-
-
         let conn_rx = Arc::new(Mutex::new(request_rx));
 
         if self.self_addr.ipaddr == peer_id.ipaddr {
@@ -285,10 +287,13 @@ impl PeerConnection {
         {
             // TURN for receiving here
             println!("Trying to leech over TURN...");
-            TurnFallback::start_leeching(self.server.turn.clone(), self.self_addr, peer_id, conn_tx, conn_rx).await;
-
-            // // TODO remove... just needed to have this to keep the program open long enough to receive data
-            // tokio::time::sleep(Duration::from_secs(5)).await;
+            TurnFallback::start_leeching(
+                self.server.turn.clone(), 
+                self.self_addr, 
+                peer_id, 
+                conn_tx, 
+                conn_rx
+            ).await?;
         }
 
         Ok(())

@@ -133,13 +133,17 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-               
-                QuicP2PConn::send_data(conn, file_map).await?;
+                tokio::spawn(async move {
+                    let res = QuicP2PConn::send_data(conn, file_map).await;
+                    if res.is_err() {
+                        eprintln!("Failed to get connection request Listener: {:?}", res);
+                    }
+                });
                 
                 Ok(())
             },
             Err(e) => {
-                return Err(Box::new(e));
+                Err(Box::from(e.to_string()))
             }
         }
     }
@@ -205,13 +209,17 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-                
-                QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await?;
+                tokio::spawn(async move {
+                    let res = QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await;
+                    if res.is_err() {
+                        eprintln!("Connect to Peer Server Error{:?}", res);
+                    }
+                });
             
                 Ok(()) 
             }
             Err(e) => {
-                return Err(Box::new(e));
+                Err(Box::new(e))
             }
             
         }
@@ -223,8 +231,6 @@ impl QuicP2PConn {
         conn_tx: Sender<Message>,
         conn_rx: Arc<Mutex<Receiver<Message>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-
-
         loop {
             if let Some(msg) = conn_rx.lock().await.recv().await {
                 
@@ -241,8 +247,6 @@ impl QuicP2PConn {
                 let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
                     tokio::spawn(async move {
                         println!("requester waiting for length {:?}", length + 9);
-                        // let mut buf = vec![0u8; (length + 9) as usize];
-                        // recv.read_exact(&mut buf).await?;
                         let buf = recv.read_to_end(length as usize + 9).await?;
                         println!("received piece from peer");
 
