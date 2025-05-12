@@ -1,5 +1,5 @@
 mod demo;
-use demo::{say_hello, say_hello_delayed, download, get_available_files, delete_file, start_seeding, stop_seeding, reconnect, disconnect, is_connected};
+use demo::{say_hello, say_hello_delayed, download, get_available_files, delete_file, start_seeding, stop_seeding, reconnect, disconnect, is_connected, is_seeding};
 use tauri::{Manager, Emitter};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -104,6 +104,7 @@ fn main() {
             reconnect,
             disconnect,
             is_connected,
+            is_seeding,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

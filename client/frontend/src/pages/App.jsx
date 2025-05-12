@@ -162,7 +162,10 @@ export default function App() {
                             transition={{ type: "spring", stiffness: 300, damping: 25 }}
                             className="w-1/3 p-4 bg-white bg-opacity-10 backdrop-blur-md rounded-xl shadow-inner border border-slate-500 flex-shrink-0 h-full"
                         >
-                            <FileDetailSidebar selected={selected} />
+                            <FileDetailSidebar
+                                selected={selected}
+                                onDelete={(deletedHash) => setFiles(files.filter(f => f.hash !== deletedHash))}
+                            />
                         </motion.div>
                     )}
                 </AnimatePresence>

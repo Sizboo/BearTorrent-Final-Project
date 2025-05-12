@@ -95,6 +95,11 @@ pub async fn stop_seeding(state: tauri::State<'_, AppState>) -> Result<(), Strin
     Ok(())
 }
 
+#[tauri::command]
+pub async fn is_seeding(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    Ok(*state.is_seeding.read().await)
+}
+
 /// Fully disconnects the client from the tracker (graceful shutdown).
 #[tauri::command]
 pub async fn disconnect(state: tauri::State<'_, AppState>) -> Result<(), String> {

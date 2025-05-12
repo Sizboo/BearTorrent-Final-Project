@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import {useEffect, useState} from 'react';
 import { Button } from '@mui/material';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -8,6 +8,13 @@ export default function ToggleButton() {
     const handleToggle = async () => {
         const newState = !isToggled;
         setIsToggled(newState);
+
+    useEffect(() => {
+        invoke("is_seeding")
+            .then((enabled) => setIsToggled(!!enabled))
+            .catch((err) => console.error("Failed to fetch seeding state:", err));
+    }, []);
+
 
         try {
             if (newState) {
