@@ -211,26 +211,6 @@ impl Connector for ConnectionService {
     
     }
 
-    /// init_cert_sender() must be called before a quic connection can be established
-    /// this will be used to send the self-signed cert from the "server" to "client"
-    ///
-    /// Convention:
-    ///     Sending Peer = Quic Server
-    ///     Receiving Peer = Quic Client
-    ///
-    /// Therefore, the receiving peer should call init_cert_sender prior to hole punching
-    /// to ensure it can receive the server's self-signed certificate
-    // async fn init_cert_sender(
-    //     &self,
-    //     request: Request<PeerId>
-    // ) -> Result<Response<()>, Status> {
-    //     let r = request.into_inner();
-    // 
-    //     let (tx, rx ) = mpsc::channel::<Cert>(1);
-    //     self.cert_sender.insert(r, (tx, Some(rx)));
-    // 
-    //     Ok(Response::new(()))
-    // }
     
     /// get_cer() is used by the client end of the quic connection to get the server's self-signed certificate
     /// it should be called and waited upon once init_cert_sender() has been called

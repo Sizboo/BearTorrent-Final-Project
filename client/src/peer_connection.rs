@@ -3,10 +3,10 @@ use std::net::{Ipv4Addr, SocketAddr};
 use tokio::{net::UdpSocket, sync::mpsc};
 use std::sync::Arc;
 use std::time::Duration;
-use tonic::{Response, Status};
+use tonic::{Response};
 use crate::quic_p2p_sender::QuicP2PConn;
 use crate::torrent_client::TorrentClient;
-use crate::connection::connection::{PeerId, FullId, ClientId, ConnectionIds};
+use crate::connection::connection::{PeerId, ConnectionIds};
 use tokio_util::sync::CancellationToken;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
@@ -19,7 +19,6 @@ pub struct PeerConnection {
     pub(crate) pub_socket: Option<UdpSocket>,
     pub(crate) priv_socket: Option<UdpSocket>,
     pub(crate) self_addr: PeerId,
-    // peer_conns: Vec<PeerConnection>,
 }
 
 impl PeerConnection {
