@@ -60,9 +60,9 @@ impl TorrentClient {
             }
         )
     }
-    
+
     ///This method registers a new peer connection by sending the public and private ip and port numbers
-    /// so that other peers can attempt to make a peer-to-peer connection with this client. 
+    /// so that other peers can attempt to make a peer-to-peer connection with this client.
     async fn register_new_connection(&mut self) -> Result<PeerConnection, Box<dyn std::error::Error>> {
         //bind port and get public facing id
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
@@ -120,9 +120,9 @@ impl TorrentClient {
             },
         ) 
     }
-    
+
     ///This method gives the server the latest peer-id (ip and port numbers) so the server can give valid
-    /// connection details to peers. 
+    /// connection details to peers.
     async fn update_registered_peer_id(
         &mut self,
         self_addr: PeerId
@@ -137,7 +137,7 @@ impl TorrentClient {
                 peer_id: Some(self_addr)
             }
         ).await {
-            Ok(res) => Ok(()),
+            Ok(_) => Ok(()),
             Err(e) => Err(Box::new(e) as Box<dyn std::error::Error>),
         }
         
@@ -184,9 +184,9 @@ impl TorrentClient {
         }
     }
 
-    ///this method is used to request a file from the peer. 
+    ///this method is used to request a file from the peer.
     /// it spins off as many connections as possible and begins the FileAssembler processes
-    /// which piece together a file from various peers. 
+    /// which piece together a file from various peers.
     pub async fn file_request(
         &mut self,
         file_hash: InfoHash
@@ -235,8 +235,8 @@ impl TorrentClient {
     }
 
     ///This method advertises a specific file to the server.
-    /// Essentially, it tells the server that this client has this file and it can 
-    /// be requested by other peers. 
+    /// Essentially, it tells the server that this client has this file and it can
+    /// be requested by other peers.
     pub async fn advertise(
         &self,
         info_hash: InfoHash

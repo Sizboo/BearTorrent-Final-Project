@@ -5,14 +5,12 @@ use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::Status;
 use std::sync::Arc;
-use tokio::{sync::{Mutex, RwLock}, time::{sleep, Duration}};
+use tokio::{sync::{Mutex, RwLock}};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use crate::file_handler::{read_piece_from_file };
 
 pub struct TurnFallback {
-    /// channel for sending TurnPackets to your peer
-    tx: mpsc::Sender<TurnPacket>,
 }
 
 impl TurnFallback {
@@ -35,7 +33,7 @@ impl TurnFallback {
 
         // register this client as a seeder for the turn service and gets the mpsc::Receiver back
         // to receive data from the TURN service
-        let mut inbound = turn_client
+        let inbound = turn_client
             .register(RegisterRequest {
                 session_id: session_id.clone(),
                 is_seeder: true,
@@ -69,8 +67,7 @@ impl TurnFallback {
             let mut inbound = inbound;
             let file_map = file_map.clone();
             let session_id = session_id.clone();
-            let leecher_id = leecher_id.clone();
-            let mut tx = tx.clone();
+            let tx = tx.clone();
 
             async move {
                 loop {
@@ -200,7 +197,10 @@ impl TurnFallback {
                                     piece: tp.payload,
                                 };
 
-                                conn_tx.send(piece_msg).await;
+                                let res = conn_tx.send(piece_msg).await;
+                                if res.is_err() {
+                                    eprintln!("failed to send piece");
+                                }
                             }
                         }
                         _ => continue,
@@ -229,7 +229,6 @@ impl TurnFallback {
             }
         }
 
-        Ok(())
     }
 }
 /// peer_to_string(

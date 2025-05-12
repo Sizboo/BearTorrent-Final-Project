@@ -9,8 +9,6 @@ mod file_assembler;
 mod message;
 
 use std::collections::HashMap;
-use std::io::Write;
-use peer_connection::PeerConnection;
 use crate::connection::connection::InfoHash;
 use crate::torrent_client::TorrentClient;
 
@@ -36,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Seeding");
 
                 let mut client_clone = torrent_client.clone();
-                let seeding = tokio::spawn(async move {
+                tokio::spawn(async move {
                     client_clone.seeding().await.unwrap();
                 });
 
@@ -45,7 +43,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut input = String::new();
                 
                 println!("Requesting");
-                //todo will need have a requesting process like seeding above
 
                 let files = torrent_client.get_server_files().await?;
 
@@ -63,7 +60,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 println!("\n\n type a number for your selection:");
 
-                std::io::stdout().flush();
                 std::io::stdin().read_line(&mut input)?;
                 
                 match input.trim() {
@@ -94,7 +90,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 println!("\n\n type a number for your selection:");
 
-                std::io::stdout().flush();
                 std::io::stdin().read_line(&mut input)?;
                 let command: u16 = input.trim().parse().expect("Invalid number");
 
@@ -113,8 +108,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-
-
-    Ok(())
 
 }

@@ -24,13 +24,13 @@ pub struct QuicP2PConn {
 impl QuicP2PConn {
 
     ///create_quic_server
-    /// 
+    ///
     /// parameters:
     ///    - TokioUdpSocket: resembles the socket to consume in the connection
     ///    - peer_id: resembles the peer to accept connections from
     ///    - server: the connection to introducer server to send certificate
     ///    - cert_ip: the ip to build the certificate off (self ip)
-    /// 
+    ///
     /// function:
     /// This creates a quinn server endpoint to accept a quic connection.
     pub(crate) async fn create_quic_server(
@@ -60,7 +60,8 @@ impl QuicP2PConn {
         println!("Server sent client certificate!");
 
 
-        let res = server_connection.send_cert(request).await?;
+        server_connection.send_cert(request).await?;
+
 
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
@@ -90,12 +91,12 @@ impl QuicP2PConn {
     }
 
     ///create_quic_client
-    /// 
+    ///
     /// parameters:
     ///    - TokioUdpSocket: resembles the socket to consume in the connection
     ///    - self_addr: holds data of own connection ips
     ///    - server: the connection to introducer server to get certificate from
-    /// 
+    ///
     /// function:
     /// This creates a quinn client endpoint to create a quic connection.
     pub (crate) async fn create_quic_client (
@@ -139,13 +140,13 @@ impl QuicP2PConn {
     }
     
     ///quic_listener
-    /// 
+    ///
     /// parameters:
     ///    - file_map: this is the map used to get file information when it is requested by peer
-    /// 
+    ///
     /// function:
     /// This method listens for a connection request, spawning off the send_data task when a connection
-    /// is successfully made. it times out after 4 seconds if no connection request is made. 
+    /// is successfully made. it times out after 4 seconds if no connection request is made.
     pub(crate) async fn quic_listener(
         &mut self,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>
@@ -176,15 +177,15 @@ impl QuicP2PConn {
     }
     
     ///send_data()
-    /// 
+    ///
     /// parameters:
     ///    - file_map: this is the file map from which file information is acquired when file
     ///                is requested.
-    /// 
+    ///
     /// function:
     /// This method waits for incoming streams. It then takes the requests from the peer and then send
     /// the requested piece. If the piece is not available, it will respond with a Cancel request indicating
-    /// the peer should ask another peer for the data. 
+    /// the peer should ask another peer for the data.
     async fn send_data(
         conn: Connection,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
@@ -246,16 +247,16 @@ impl QuicP2PConn {
     }
 
     ///connect_to_peer_server
-    /// 
-    /// parameter: 
+    ///
+    /// parameter:
     ///     - peer_addr: the is the address of the peer to connect to
     ///     - conn_rx: this is the receiving end of the file assembler channel from which to get requests from
     ///     - conn_tx: this is the sending end of the file assembler channel from which to send responses
-    /// 
+    ///
     /// function:
     /// This method tries to connect to the peer quic server. If it succeeds, it spins off the recv_data task
     /// which sends file piece requests. It will timeout and return a failure in 4 seconds if it does not
-    /// succeed in making a connection. 
+    /// succeed in making a connection.
     pub(crate) async fn connect_to_peer_server(
         &mut self,
         peer_addr: SocketAddr,
@@ -285,13 +286,13 @@ impl QuicP2PConn {
         }
         
     }
-    
+
     ///recv_data
-    /// 
+    ///
     /// parameters:
     ///    - conn_tx: the sending end of channel to send peer responses to reassembly_loop
     ///    - conn_rx: the receiving end of the channel to receive requests from request sender.
-    /// 
+    ///
     /// function:
     /// This method loops through all the requests delegated to it by the receiver. It sends those
     /// to the peer and passes the response back up to the requester. If the connection fails,
@@ -303,7 +304,7 @@ impl QuicP2PConn {
     ) -> Result<(), Box<dyn std::error::Error>> {
         loop {
             if let Some(msg) = conn_rx.lock().await.recv().await {
-                
+
                 match conn.open_bi().await {
                     Ok((mut send, mut recv)) => {
                         println!("requester opened bi stream!");
@@ -335,7 +336,7 @@ impl QuicP2PConn {
                         let res = ret.await?;
                         if res.is_err() {
                             eprintln!("{:?}", res);
-                        } 
+                        }
                     },
                     //if connection errors, we want to resend the requests to another connection
                     //this loops it back to file_assembler so it can handle removing this connection
@@ -348,9 +349,9 @@ impl QuicP2PConn {
                             _ => continue,
                         };
                         conn_tx.send(cancel_req).await?;
-                    } 
+                    }
                 }
-                
+
             } else {
                 println!("connection closed");
                 conn.close(0u32.into(), b"closing connection gracefully");
