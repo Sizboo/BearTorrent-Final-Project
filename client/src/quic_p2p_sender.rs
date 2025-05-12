@@ -164,7 +164,7 @@ impl QuicP2PConn {
                         Ok((mut send, mut recv)) => {
                            println!("Seeder accepted bi stream!");
 
-                            let mut req_buf : [u8; 37] = [0; 37];
+                            let mut req_buf : [u8; 41] = [0; 41];
                             recv.read_exact(&mut req_buf).await?;
                             println!("Client received req {:?}", req_buf);
 
@@ -177,7 +177,7 @@ impl QuicP2PConn {
                             }
                             let (seeder, index, begin, length, hash) = request.ok_or("failed to decode request")?;
 
-                            
+
                             let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?;
 
 
@@ -200,7 +200,7 @@ impl QuicP2PConn {
                                 Err(Box::from(other.to_string()))
                             }
                         }
-                    } 
+                    }
                 }
             }
         }

@@ -116,7 +116,7 @@ impl TorrentClient {
         ) 
     }
     async fn update_registered_peer_id(
-        &mut self, 
+        &mut self,
         self_addr: PeerId
     ) -> Result<(), Box<dyn std::error::Error>> {
         
@@ -149,7 +149,7 @@ impl TorrentClient {
 
             // calls get_peer
             println!("Seeding with {:?}", peer_connection.self_addr);
-            
+
             tokio::select! {
                 _ = self.close_down.notified() => {
                     println!("Shutting down");
@@ -178,7 +178,7 @@ impl TorrentClient {
 
     ///request is a method used to request necessary connection details from the server
     pub async fn file_request(
-        &mut self, 
+        &mut self,
         file_hash: InfoHash
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
@@ -193,8 +193,8 @@ impl TorrentClient {
         let assembler =FileAssembler::new(file_hash.clone(), num_connections).await;
 
         let mut connection_handles = Vec::new();
-        
-        
+
+
         //spawn the correct number of connections
         for i in 0..num_connections {
             let mut peer_connection = self.register_new_connection().await?;
@@ -211,11 +211,11 @@ impl TorrentClient {
             });
             connection_handles.push(handle);
         }
-        
-   
+
+
         //begin assemble task
         assembler.write().await.start_requesting();
-        
+
         //wait on connections to finish
         for handle in connection_handles {
             handle.await?;
@@ -225,13 +225,13 @@ impl TorrentClient {
     }
 
     pub async fn advertise(
-        &self, 
+        &self,
         info_hash: InfoHash
     ) -> Result<ClientId, Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
-        
+
         let file_hash = FileHash { hash: Vec::from(info_hash.get_hashed_info_hash())};
-        
+
         //todo make hash active
         let request = Request::new(FileMessage {
             id: Some(self.uid.clone()),
@@ -263,7 +263,7 @@ impl TorrentClient {
         Ok(info_hashes)
 
     }
-    
+
     pub async fn delete_file(
         &self,
         file_hash: InfoHash
@@ -274,20 +274,20 @@ impl TorrentClient {
             id: Some(self.uid.clone()),
             hash: Some(hash),
         };
-       
+
         server_connection.delete_file(file_delete).await?;
-        
+
         file_handler::delete_file(file_hash.name)?;
-        
+
         Ok(())
     }
-    
+
     pub async fn remove_client(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut server_connection = self.client.clone();
-        
+
         server_connection.delist_client(self.uid.clone()).await?;
         self.close_down.notify_waiters();
-        
+
         Ok(())
     }
 
