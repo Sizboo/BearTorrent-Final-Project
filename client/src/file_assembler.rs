@@ -1,9 +1,11 @@
+use std::ptr::hash;
 use std::sync::Arc;
 use crate::connection::connection::{InfoHash};
 use crate::message::Message;
 use tokio::sync::{mpsc, Notify, RwLock};
+use tonic::Request;
 use crate::{file_handler};
-use crate::file_handler::write_piece_to_part;
+use crate::file_handler::{hash_piece_data, write_piece_to_part};
 
 /// this represents a connection between 2 peers
 #[derive(Debug)]
@@ -15,7 +17,7 @@ pub struct FileAssembler {
     ///number of active peer connections achieved
     num_connections: usize,
     ///the sender used for LAN/P2P/QUIC to send data from
-    conn_tx: mpsc::Sender<Message>, 
+    conn_tx: mpsc::Sender<Message>,
     /// sender used to send file requests across a connection
     request_txs: Vec<mpsc::Sender<Message>>,
 }
@@ -60,6 +62,17 @@ impl FileAssembler {
         self.conn_tx.clone()
     }
 
+    pub fn subscribe_new_connection(&mut self) -> mpsc::Receiver<Message> {
+        let (request_tx, request_rx) = mpsc::channel::<Message>(150);
+        self.request_txs.push(request_tx);
+
+        request_rx
+    }
+
+    pub fn start_requesting(&mut self) {
+        println!("Notifying waiters");
+        self.start_requesting.notify_waiters();
+    }
 
     async fn send_requests(
         hash: [u8; 20],
@@ -92,8 +105,8 @@ impl FileAssembler {
 
             println!("Sending piece request {}", i);
             assembler.read().await.request_txs.get(i % num_connections)
-                .ok_or(Box::<dyn std::error::Error + Send + Sync>::from("Could not retrieve connection rx"))?
-                .send(request).await?;
+                .ok_or("Could not retrieve connection rx".to_string())?
+                .send(request).await.map_err(|e| e.to_string())?;
 
         }
 
@@ -109,14 +122,19 @@ impl FileAssembler {
                 let msg = match msg {
                     Message::Cancel {index, begin, length, .. } =>
                         Message::Request {seeder: new_seeder, index, begin, length, hash},
-                    Message::Request { index, begin, length, hash, ..} =>
-                        Message::Request {seeder: new_seeder, index, begin, length, hash},
+                    Message::Piece { index, ..} =>
+                        Message::Request {
+                            seeder: new_seeder,
+                            index,
+                            begin: piece_length * index,
+                            length: piece_length,
+                            hash},
                     _ => continue,
                 };
 
                 assembler.read().await.request_txs.get(new_seeder as usize)
                     .ok_or_else(|| format!("No connection sender found for index {}", i))?
-                    .send(request).await.map_err(|e| e.to_string())?;
+                    .send(msg).await.map_err(|e| e.to_string())?;
 
                 i += 1;
 
@@ -125,13 +143,6 @@ impl FileAssembler {
                 return Ok(())
             }
         }
-    }
-
-    pub async fn subscribe_new_connection(&mut self) -> mpsc::Receiver<Message> {
-        let (request_tx, request_rx) = mpsc::channel::<Message>(50);
-        self.request_txs.write().await.push(request_tx);
-
-        request_rx
     }
 
 
@@ -145,33 +156,66 @@ impl FileAssembler {
 
 
         loop {
-           let msg = conn_rx.recv().await.ok_or("failed to get message")?;
-           
-           match msg {
-               Message::Piece { index, piece  } => {
-                   println!("Received Piece: {}", index);
-                   write_piece_to_part(info_hash.clone(), piece, index)?;
-                   println!("Successfully Wrote: {}", index);
+            let msg = conn_rx.recv().await.ok_or("failed to get message")?;
 
-                   if file_handler::is_file_complete(info_hash.clone()) {
-                       break;
-                   }
-               },
-               Message::Cancel {seeder,index, begin, length} => {
-                   println!("Failed to get piece removing seeder and trying again");
+            match msg {
+                Message::Piece { index, piece  } => {
+                    println!("Received Piece: {}", index);
+                    //We want to verify the piece was not corrupted across transport.
+                    //If it was, we want to resend a request for a new piece.
+                    let recvd_piece_hash = hash_piece_data(piece.clone());
+                    let expected_hash: [u8; 20] = info_hash.pieces
+                        .get(index as usize)
+                        .cloned()
+                        .ok_or("Could not retrieve piece hash".to_string())?
+                        .hash
+                        .try_into()
+                        .map_err(|_| "Could not convert piece hash".to_string())?;
 
-                   //if we get a cancel notification, we are going to assume this means the seeder
-                   //does not or cannot provide the data. So we will remove it from seeder list
-                   //and resend a request.
+                    if recvd_piece_hash != expected_hash {
+                        println!("Piece corrupted, sending resend request");
+                        resend_tx
+                            .send(Message::Piece { index, piece })
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        continue;
+                    }
+                    write_piece_to_part(info_hash.clone(), piece, index).map_err(|e| e.to_string())?;
+                    println!("Successfully Wrote: {}", index);
 
-                   assembler.write().await.request_txs.remove(seeder as usize);
-                   assembler.write().await.num_connections -= 1;
+                    if file_handler::is_file_complete(info_hash.clone()) {
+                        break;
+                    }
+                },
+                Message::Cancel { seeder, index, begin, length } => {
+                    println!("Failed to get piece removing seeder and trying again");
 
-                   resend_tx.send(Message::Cancel {seeder, index, begin, length}).await?;
+                    let bad_tx = assembler.write().await.request_txs
+                        .get(seeder as usize)
+                        .cloned()
+                        .ok_or_else(|| format!("Invalid seeder index: {}", seeder))?;
 
-               },
-               _ => Err(Box::<dyn std::error::Error + Send + Sync>::from("wrong message type"))?,
-           };
+                    //if we get a cancel notification, we are going to assume this means the seeder
+                    //does not or cannot provide the data. So we will remove it from seeder list
+                    //and resend a request.
+
+                    assembler.write().await.request_txs.remove(seeder as usize);
+                    assembler.write().await.num_connections -= 1;
+                    drop(bad_tx);
+
+                    if assembler.read().await.num_connections == 0 {
+                        drop(resend_tx);
+                        return Err("Failed to Retrieve File".to_string());
+                    }
+
+                    resend_tx.send(Message::Cancel { seeder, index, begin, length })
+                        .await
+                        .map_err(|e| e.to_string())?;
+                },
+
+                _ => return Err("wrong message type".to_string()),
+
+            };
 
 
         }

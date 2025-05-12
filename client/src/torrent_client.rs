@@ -128,7 +128,7 @@ impl TorrentClient {
             priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
             priv_port: priv_port as u32,
         };
-        socket.set_nonblocking(true)?;
+        socket.set_nonblocking(true).map_err(|e| format!("Failed to set non-blocking: {}", e))?;
 
         self.update_registered_peer_id(self_addr.clone()).await?;
 
@@ -221,6 +221,9 @@ impl TorrentClient {
 
             let conn_tx = assembler.read().await.get_conn_tx();
             let request_rx = assembler.write().await.subscribe_new_connection();
+
+
+
             let peer_id = peer_list[i];
             let handle = tokio::spawn(async move {
                 
@@ -235,6 +238,7 @@ impl TorrentClient {
 
         //begin assemble task
         assembler.write().await.start_requesting();
+
         for handle in connection_handles {
             handle.await.map_err(|e| format!("Task join error: {e}"))?;
         }

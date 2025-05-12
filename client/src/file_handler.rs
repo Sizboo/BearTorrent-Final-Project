@@ -389,7 +389,7 @@ pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn 
         create_dir_all(&downloads_dir)?;
 
         // Build the new target file path
-        let new_file_path = downloads_dir.join(&info_hash.name);
+        let new_file_name = downloads_dir.join(&info_hash.name);
 
             // Check if the file already exists to prevent overwriting
             if exists(Path::new(&new_file_name))?{

@@ -21,7 +21,7 @@ export default function ConnectToggle() {
     const handleConnectToggle = async () => {
         try {
             if (!isConnected) {
-                await invoke('connect');
+                await invoke('reconnect');
                 setIsConnected(true);
             } else {
                 await invoke('disconnect');
