@@ -177,16 +177,16 @@ impl QuicP2PConn {
                             }
                             let (seeder, index, begin, length, hash) = request.ok_or("failed to decode request")?;
 
-
+                            //if no message found, we send a Cancel message back indicating we do not have the piece
+                            //the client will then re-issue this request to another peer.
                             let msg = match file_map.read().await.get(&hash).cloned(){
                                 Some(info_hash) => {
-                                    let piece = read_piece_from_file(info_hash, index)?
-                                    Message::Piece { index, piece }
+                                    match read_piece_from_file(info_hash, index) {
+                                        Ok(piece) => Message::Piece { index, piece },
+                                        Err(_) => Message::Cancel {seeder, index, begin, length},
+                                    }
                                 },
-                                //if no message found, we send a Cancel message back indicating we do not have the piece
-                                //the client will then re-issue this request to another peer.
                                 None => Message::Cancel {seeder, index, begin, length},
- 
                             };
 
                             send.write_all(&msg.encode()).await?;
