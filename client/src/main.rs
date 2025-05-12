@@ -24,12 +24,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut torrent_client = TorrentClient::new().await?;
 
 
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-
-    let command = input.trim();
     // let server_conn_clone = server_conn.clone();
     loop {
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+
+        let command = input.trim();
+        
         match command {
             "s" => {
                 println!("Seeding");
@@ -39,7 +40,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     client_clone.seeding().await.unwrap();
                 });
 
-                seeding.await.expect("seeding broken");
             }
             "r" => {
                 let mut input = String::new();
