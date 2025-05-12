@@ -10,12 +10,10 @@ use tokio::sync::{Notify, RwLock};
 use tonic::Request;
 use tonic::transport::{Channel, ClientTlsConfig};
 use crate::connection::connection::*;
-
 use crate::file_assembler::FileAssembler;
 use crate::file_handler;
 use crate::file_handler::{get_info_hashes};
 use crate::peer_connection::PeerConnection;
-use crate::turn_fallback::TurnFallback;
 
 #[derive(Debug, Clone)]
 pub struct TorrentClient {
@@ -68,6 +66,9 @@ impl TorrentClient {
         )
     }
 
+
+
+
     pub fn is_connected(&self) -> bool {
         !self.uid.uid.is_empty()
     }
@@ -117,12 +118,17 @@ impl TorrentClient {
             .set_nonblocking(true)
             .map_err(|e| format!("Set non-blocking failed: {}", e))?;
 
+        println!("My private IP {:?}", priv_ipaddr);
+        println!("My private port is {}", priv_port);
+
+
         let self_addr = PeerId {
             ipaddr,
             port: external_addr.port() as u32,
             priv_ipaddr: u32::from_be_bytes(priv_ipaddr.octets()),
             priv_port: priv_port as u32,
         };
+        socket.set_nonblocking(true)?;
 
         self.update_registered_peer_id(self_addr.clone()).await?;
 
@@ -136,7 +142,10 @@ impl TorrentClient {
         })
     }
 
-    async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), String> {
+    async fn update_registered_peer_id(
+        &mut self,
+        self_addr: PeerId
+    ) -> Result<(), String> {
         let mut server_conn = self.client.clone();
 
         server_conn
@@ -150,27 +159,41 @@ impl TorrentClient {
         Ok(())
     }
 
-    pub async fn seeding(&mut self) -> Result<(), String> {
+    ///seeding is used as a listening process to begin sending data upon request
+    /// it simply awaits a server request for it to send data
+    pub async fn seeding(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+
         loop {
             let mut peer_connection = self.register_new_connection().await?;
             let mut server_client = self.client.clone();
 
+            //update server's list of seeder files
             self.advertise_all().await?;
 
-            let response = server_client
-                .seed(peer_connection.self_addr.clone())
-                .await;
+            // calls get_peer
+            println!("Seeding with {:?}", peer_connection.self_addr);
 
-            match response {
-                Ok(res) => {
-                    tokio::spawn(async move {
-                        if let Err(e) = peer_connection.seeder_connection(res).await {
-                            eprintln!("Connect Failed: {e}");
-                        }
-                    });
+            tokio::select! {
+                _ = self.close_down.notified() => {
+                    println!("Shutting down");
+                    return Ok(());
                 }
-                Err(e) => {
-                    eprintln!("Failed to get peer: {e}");
+                response = server_client.seed(peer_connection.self_addr.clone()) => {
+                    // waits for response from get_peer
+                    match response {
+                        Ok(res) => {
+                            tokio::spawn(async move {
+                                let res = peer_connection.seeder_connection(res).await;
+                                if res.is_err() {
+                                    println!("Connect Failed: {}", res.err().unwrap());
+                                }
+                            });
+
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get peer: {:?}", e);
+                        }
+                    }
                 }
             }
         }
@@ -187,17 +210,20 @@ impl TorrentClient {
         //we want to maximize connection which means either one connection per piece
         // or one connection per peer, whichever is less.
         let num_connections = min(peer_list.len(), file_hash.pieces.len());
-        let mut assembler = FileAssembler::new(file_hash.clone()).await;
-
+        let assembler =FileAssembler::new(file_hash.clone(), num_connections).await;
 
         let mut connection_handles = Vec::new();
+
+
         //spawn the correct number of connections
         for i in 0..num_connections {
             let mut peer_connection = self.register_new_connection().await?;
-            let conn_tx = assembler.get_conn_tx();
-            let request_rx = assembler.subscribe_new_connection().await;
+
+            let conn_tx = assembler.read().await.get_conn_tx();
+            let request_rx = assembler.write().await.subscribe_new_connection();
             let peer_id = peer_list[i];
             let handle = tokio::spawn(async move {
+                
                 let res = peer_connection.requester_connection(peer_id,conn_tx, request_rx).await;
                 if res.is_err() {
                     eprintln!("connection error: {}", res.err().unwrap());
@@ -206,10 +232,9 @@ impl TorrentClient {
             connection_handles.push(handle);
         }
 
+
         //begin assemble task
-        assembler.send_requests(num_connections, file_hash).await.map_err(|e| format!("Send requests failed: {}", e))?;
-
-
+        assembler.write().await.start_requesting();
         for handle in connection_handles {
             handle.await.map_err(|e| format!("Task join error: {e}"))?;
         }
@@ -263,19 +288,15 @@ impl TorrentClient {
         file_hash: InfoHash
     ) -> Result<(), String> {
         let mut server_connection = self.client.clone();
-        let hash = FileHash { hash: Vec::from(file_hash.get_hashed_info_hash()) };
+        let hash = FileHash { hash: Vec::from(file_hash.get_hashed_info_hash())};
         let file_delete = FileDelete {
             id: Some(self.uid.clone()),
             hash: Some(hash),
         };
 
-        server_connection
-            .delete_file(file_delete)
-            .await
-            .map_err(|e| e.to_string())?;  // Convert tonic::Status to String
+        server_connection.delete_file(file_delete).await.map_err(|e| e.to_string())?;  // Convert tonic::Status to String
 
-        file_handler::delete_file(file_hash.name)
-            .map_err(|e| e.to_string())?; // Convert std::io::Error to String
+        file_handler::delete_file(file_hash.name).map_err(|e| e.to_string())?; // Convert std::io::Error to String
 
         Ok(())
     }

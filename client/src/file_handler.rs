@@ -14,7 +14,9 @@ use hex::encode;
 //     pub(crate) pieces: Vec<[u8;20]>, // hash list of the pieces
 // }
 
-// Represents the status of the piece download
+// Represents the status of the piece download inside a vector.
+// This vector represents the status of each piece, and whether
+// it has been fully received or not.
 #[derive(Debug)]
 pub struct Status{
     pub(crate) pieces_status: Vec<u8> // Using u8 for simplified reading and writing
@@ -64,7 +66,7 @@ impl connection::InfoHash {
                 let piece_length = Self::get_piece_length(file_length);
                 // Vector of piece hashes
                 let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
-
+                
                 // Create the new cache file to improve load time
                 let mut file = OpenOptions::new().write(true).open(file_cache)?;
 
@@ -79,7 +81,7 @@ impl connection::InfoHash {
                     let hex_hash = hex::encode(&piece.hash); // converts to hex string
                     writeln!(file, "{}", hex_hash)?;
                 }
-
+                
                 println!("File length: {}", file_length);
                 println!("Piece length: {}", piece_length);
                 println!("Pieces: {:x?}", pieces);
@@ -96,7 +98,7 @@ impl connection::InfoHash {
             // A cached file was identified, load it to save time
             true =>{
                 let mut file = OpenOptions::new().read(true).open(file_cache)?;
-
+                
                 // Load content from the cache file
                 let mut contents = String::new();
                 file.read_to_string(&mut contents)?;
@@ -237,10 +239,9 @@ fn get_file_cache(file_name: String) -> (PathBuf, bool) {
 
 // Gets the actual file
 fn get_file(file_name: String) -> PathBuf {
-    let (path, _) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
+    let (path, is_new) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
     path
 }
-
 
 // Create the files directory if it doesn't exist
 fn get_client_files_dir() -> std::io::Result<PathBuf> {
@@ -277,10 +278,11 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
     let (path, is_new) = get_info_file(info_hash.name);
     let mut info_file = OpenOptions::new().write(true).read(true).open(&path).unwrap();
     match is_new {
-        // If the .info has never been generated before, construct the file
+        // .info existed before, so we can read from it
         true => {
             let mut buffer: Vec<u8> = Vec::new();
             let mut buf = [0u8; 1];
+            // Read each u8 into the buffer
             while let Ok(n) = info_file.read(&mut buf){
                 if n == 0 {
                     break;
@@ -292,7 +294,7 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
                 pieces_status: buffer
             }
         }
-        // .info existed before, so we can read from it
+        // If the .info has never been generated before, construct the file
         false => {
             let pieces= vec![0u8;info_hash.pieces.len()];
             info_file.write_all(&pieces).unwrap();
@@ -315,7 +317,7 @@ pub(crate) fn hash_piece_data(buf: Vec<u8>) -> [u8;20]{
     bytes.into()
 }
 
-// Deletes a file and its associated cache files from Torrent
+// Deletes a file and its associated cache files from Download/Torrent, if any exist
 pub(crate) fn delete_file(file_name: String) -> std::io::Result<()> {
     let file_path = dirs::download_dir()
         .unwrap()
@@ -370,11 +372,12 @@ pub(crate) fn add_file(path: String) -> std::io::Result<()> {
 // If the file can be completed, the .info cache file is removed and the .part
 // file moves to Downloads/TorrentFiles removing the extension
 pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn std::error::Error>> {
-    if is_file_complete(info_hash.clone()) {
-        // Get both cached files
-        println!("Printing: {:?}", info_hash.name.clone());
-        let part_file = get_part_file(info_hash.name.clone());
-        let (info_file, _) = get_info_file(info_hash.name.clone());
+    match is_file_complete(info_hash.clone()) {
+        true => {
+            // Get both cached files
+            println!("Printing: {:?}", info_hash.name.clone());
+            let part_file = get_part_file(info_hash.name.clone());
+            let (info_file, _) = get_info_file(info_hash.name.clone());
 
         // Get Downloads/TorrentFiles/files directory
         let downloads_dir = dirs::download_dir()
@@ -388,20 +391,20 @@ pub(crate) fn build_file(info_hash: connection::InfoHash) -> Result<(), Box<dyn 
         // Build the new target file path
         let new_file_path = downloads_dir.join(&info_hash.name);
 
-        // Check if the file already exists to prevent overwriting
-        if new_file_path.exists() {
-            return Err("File already exists in Downloads/TorrentFiles/files, cannot build!".into());
-        }
+            // Check if the file already exists to prevent overwriting
+            if exists(Path::new(&new_file_name))?{
+                return Err("File already exists in Downloads/TorrentFiles/files, cannot build!".into());
+            }
 
-        // Move the .part file to the destination
-        rename(part_file, new_file_path)?;
+            // Move the .part file to Downloads/TorrentFiles/files
+            rename(part_file, new_file_name)?;
 
-        // Remove the .info file
-        remove_file(info_file)?;
+            // remove the .info file
+            remove_file(info_file)?;
 
-        Ok(())
-    } else {
-        Err("Missing pieces for file, cannot build!".into())
+            Ok(())
+        },
+        false => Err("Missing pieces for file, cannot build!".into())
     }
 }
 
@@ -466,9 +469,8 @@ pub(crate) fn read_piece_from_file(info_hash: connection::InfoHash, piece_index:
 // This function goes through the client's resource directory
 // to generate info hashes for each file
 // Returns: Vec<InfoHash>
-/// Scans the user's Downloads/TorrentFiles/files directory and builds InfoHash records.
-pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8; 20], connection::InfoHash>> {
-    let mut results: HashMap<[u8; 20], connection::InfoHash> = HashMap::new();
+pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], connection::InfoHash>> {
+    let mut results: HashMap<[u8;20],connection::InfoHash> = HashMap::new();
 
     // Locate the Downloads/TorrentFiles/files path
     let downloads_dir = dirs::download_dir()
@@ -487,11 +489,14 @@ pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8; 20], connection:
         let file = entry?;
         let path = file.path();
 
+        // If the entry is a file, create InfoHash and append
         if path.is_file() {
-            let info_hash = connection::InfoHash::new(file)?;
-            results.insert(info_hash.get_hashed_info_hash(), info_hash);
+            let temp_infohash = connection::InfoHash::new(file)?;
+            results.insert(temp_infohash.get_hashed_info_hash(), temp_infohash);
         }
     }
 
+    // Return the list of hashes
     Ok(results)
+
 }

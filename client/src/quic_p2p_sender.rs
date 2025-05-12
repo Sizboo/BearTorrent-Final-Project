@@ -133,13 +133,17 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-               
-                QuicP2PConn::send_data(conn, file_map).await?;
+                tokio::spawn(async move {
+                    let res = QuicP2PConn::send_data(conn, file_map).await;
+                    if res.is_err() {
+                        eprintln!("Failed to get connection request Listener: {:?}", res);
+                    }
+                });
                 
                 Ok(())
             },
             Err(e) => {
-                return Err(Box::new(e));
+                Err(Box::from(e.to_string()))
             }
         }
     }
@@ -156,36 +160,48 @@ impl QuicP2PConn {
                     return Ok(());
                 },
                 stream = conn.accept_bi() => {
-                    let (mut send, mut recv) = stream?;
-                    println!("Seeder accepted bi stream!");
+                    match stream {
+                        Ok((mut send, mut recv)) => {
+                           println!("Seeder accepted bi stream!");
 
-                    let mut req_buf : [u8; 37] = [0; 37];
-                    recv.read_exact(&mut req_buf).await?;
-                    println!("Client received req {:?}", req_buf);
+                            let mut req_buf : [u8; 41] = [0; 41];
+                            recv.read_exact(&mut req_buf).await?;
+                            println!("Client received req {:?}", req_buf);
 
-                    let mut request = None;
-                    if let Some(msg) = Message::decode(Vec::from(req_buf)) {
-                        request = match msg {
-                            Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
-                            _ => None,
-                        };
+                            let mut request = None;
+                            if let Some(msg) = Message::decode(Vec::from(req_buf)) {
+                                request = match msg {
+                                    Message::Request { seeder, index, begin, length, hash } => Some((seeder, index, begin, length, hash)),
+                                    _ => None,
+                                };
+                            }
+                            let (seeder, index, begin, length, hash) = request.ok_or("failed to decode request")?;
+
+                            //if no message found, we send a Cancel message back indicating we do not have the piece
+                            //the client will then re-issue this request to another peer.
+                            let msg = match file_map.read().await.get(&hash).cloned(){
+                                Some(info_hash) => {
+                                    match read_piece_from_file(info_hash, index) {
+                                        Ok(piece) => Message::Piece { index, piece },
+                                        Err(_) => Message::Cancel {seeder, index, begin, length},
+                                    }
+                                },
+                                None => Message::Cancel {seeder, index, begin, length},
+                            };
+
+                            send.write_all(&msg.encode()).await?;
+                            send.finish()?;
+                        },
+                        Err(e) => return match e {
+                            quinn::ConnectionError::ApplicationClosed(closed) => {
+                                println!("Connection Closed: {:?}", closed.reason);
+                                Ok(())
+                            },
+                            other => {
+                                Err(Box::from(other.to_string()))
+                            }
+                        }
                     }
-                    let (index, begin, length, hash) = request.ok_or("failed to decode request")?;
-
-                    let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?;
-
-
-                    let piece = read_piece_from_file(info_hash, index)?;
-                    println!("Got piece vector");
-
-                    let msg = Message::Piece { index, piece };
-
-                    let msg = &msg.encode();
-                    let len = msg.len();
-
-                    send.write_all(msg).await?;
-                    send.finish()?;
-                    println!("Seeder sent piece of length {:?}", len);
                 }
             }
         }
@@ -205,13 +221,17 @@ impl QuicP2PConn {
         
         match res {
             Ok(conn) => {
-                
-                QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await?;
+                tokio::spawn(async move {
+                    let res = QuicP2PConn::recv_data(conn, conn_tx, conn_rx).await;
+                    if res.is_err() {
+                        eprintln!("Connect to Peer Server Error{:?}", res);
+                    }
+                });
             
                 Ok(()) 
             }
             Err(e) => {
-                return Err(Box::new(e));
+                Err(Box::new(e))
             }
             
         }
@@ -223,8 +243,6 @@ impl QuicP2PConn {
         conn_tx: Sender<Message>,
         conn_rx: Arc<Mutex<Receiver<Message>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-
-
         loop {
             if let Some(msg) = conn_rx.lock().await.recv().await {
                 
@@ -241,14 +259,12 @@ impl QuicP2PConn {
                 let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
                     tokio::spawn(async move {
                         println!("requester waiting for length {:?}", length + 9);
-                        // let mut buf = vec![0u8; (length + 9) as usize];
-                        // recv.read_exact(&mut buf).await?;
                         let buf = recv.read_to_end(length as usize + 9).await?;
                         println!("received piece from peer");
 
-                        let piece = Message::decode(buf).ok_or("failed to decode message")?;
+                        let msg = Message::decode(buf).ok_or("failed to decode message")?;
 
-                        conn_tx_clone.send(piece).await?;
+                        conn_tx_clone.send(msg).await?;
 
                         Ok(())
                     });
@@ -263,7 +279,7 @@ impl QuicP2PConn {
                 }
             } else {
                 println!("connection closed");
-                conn.close(0u32.into(), b"closing connection");
+                conn.close(0u32.into(), b"closing connection gracefully");
                 return Ok(())
             }
         }
