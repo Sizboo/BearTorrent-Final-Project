@@ -66,7 +66,7 @@ impl connection::InfoHash {
                 let piece_length = Self::get_piece_length(file_length);
                 // Vector of piece hashes
                 let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
-                
+
                 // Create the new cache file to improve load time
                 let mut file = OpenOptions::new().write(true).open(file_cache)?;
 
@@ -81,7 +81,7 @@ impl connection::InfoHash {
                     let hex_hash = hex::encode(&piece.hash); // converts to hex string
                     writeln!(file, "{}", hex_hash)?;
                 }
-                
+
                 println!("File length: {}", file_length);
                 println!("Piece length: {}", piece_length);
                 println!("Pieces: {:x?}", pieces);
@@ -98,7 +98,7 @@ impl connection::InfoHash {
             // A cached file was identified, load it to save time
             true =>{
                 let mut file = OpenOptions::new().read(true).open(file_cache)?;
-                
+
                 // Load content from the cache file
                 let mut contents = String::new();
                 file.read_to_string(&mut contents)?;
@@ -192,10 +192,7 @@ impl connection::InfoHash {
         hasher.update(self.file_length.to_be_bytes());
         hasher.update(self.piece_length.to_be_bytes());
         hasher.update(self.name.as_bytes());
-        for (i, piece) in self.pieces.iter().enumerate() {
-            if i == self.pieces.len() - 1 {
-                break;
-            }
+        for piece in &self.pieces {
             hasher.update(piece.hash.as_slice());
         }
 
@@ -289,7 +286,7 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
                 }
                 buffer.append(&mut buf.to_vec());
             }
-            
+
             Status{
                 pieces_status: buffer
             }
@@ -314,7 +311,6 @@ pub(crate) fn hash_piece_data(buf: Vec<u8>) -> [u8;20]{
     // Finalize result of the hash, append 20-byte result to the pieces vector
     let result = hasher.finalize();
     let bytes: [u8; 20] = result.try_into().unwrap();
-    println!("{:?}", buf.clone());
     bytes.into()
 }
 
