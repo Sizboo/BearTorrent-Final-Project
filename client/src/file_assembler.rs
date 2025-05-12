@@ -190,8 +190,9 @@ impl FileAssembler {
                    //does not or cannot provide the data. So we will remove it from seeder list
                    //and resend a request.
 
-                   assembler.write().await.request_txs.remove(seeder as usize);
+                   let bad_tx = assembler.write().await.request_txs.remove(seeder as usize);
                    assembler.write().await.num_connections -= 1;
+                   drop(bad_tx);
 
                    if assembler.read().await.num_connections == 0 {
                        drop(resend_tx);
