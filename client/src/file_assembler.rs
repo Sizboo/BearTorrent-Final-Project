@@ -24,6 +24,15 @@ pub struct FileAssembler {
 
 impl FileAssembler {
 
+    ///FileAssembler::new()
+    /// parameters:
+    ///     - file_hash: the InfoHash object of the file requesting
+    ///     - num_connections: the number of successful p2p connections
+    ///
+    /// function:
+    /// This method creates a new FileAssembler object within Arc<RwLock<>>.
+    /// It spawns off both necessary file assembly processes, one for sending requests
+    /// and one for reassembling a file from pieces.
     pub async fn new(file_hash: InfoHash, num_connection: usize) -> Arc<RwLock<FileAssembler>> {
         let (conn_tx, conn_rx) = mpsc::channel::<Message>(150);
         let assembler = FileAssembler {
@@ -34,7 +43,7 @@ impl FileAssembler {
             request_txs: Vec::new(),
         };
 
-        let (resend_tx, resend_rx) = mpsc::channel::<Message>(10);
+        let (resend_tx, resend_rx) = mpsc::channel::<Message>(100);
 
         let assembler = Arc::new(RwLock::new(assembler));
 
@@ -58,10 +67,25 @@ impl FileAssembler {
         assembler
     }
 
+    ///get_conn_tx()
+    /// parameters:
+    ///     - self: to copy conn_tx
+    ///
+    ///function:
+    ///Returns a clone of internal conn_tx which connections will
+    ///use to communicate to the reassemble process.
     pub fn get_conn_tx(&self) -> mpsc::Sender<Message> {
         self.conn_tx.clone()
     }
 
+    ///subscribe_new_connection()
+    ///parameters:
+    ///    - mut self: self to add tx to array
+    ///
+    ///function:
+    ///This method "subscribes" a new connection by adding a tx to an internal
+    ///vector of tx handles and returning the associated receiver
+    ///so that the send_requests method can send requests to connections.
     pub fn subscribe_new_connection(&mut self) -> mpsc::Receiver<Message> {
         let (request_tx, request_rx) = mpsc::channel::<Message>(150);
         self.request_txs.push(request_tx);
@@ -69,11 +93,26 @@ impl FileAssembler {
         request_rx
     }
 
+
+    /// start_requesting begins the requesting process
+    /// this should only be called once connections have been
+    /// successfully established.
     pub fn start_requesting(&mut self) {
         println!("Notifying waiters");
         self.start_requesting.notify_waiters();
     }
 
+    ///send_requests
+    /// parameters:
+    ///     - hash: this is the 20 byte hash of the InfoHash for the requested file
+    ///     - assembler: this is a reference to the shared assembler object
+    ///     - resend_rx: receiving end of channel used to get resend requests from reassemble loop
+    ///
+    /// function:
+    /// This method loops through all connections evenly splitting the number of file
+    /// pieces amongst connected peers. Once it sends out all initial requests, it listens
+    /// for resend requests which will be issued by reassemble_loop. Once reassemble_loop
+    /// gets the complete file, it will drop the resend_tx ending this process.
     async fn send_requests(
         hash: [u8; 20],
         assembler: Arc<RwLock<FileAssembler>>,
@@ -114,7 +153,7 @@ impl FileAssembler {
         loop {
             if let Some(msg) = resend_rx.recv().await {
 
-                println!("Sending request {:?}", msg);
+                println!("Sending request");
 
                 let new_seeder = (i % assembler.read().await.num_connections) as u32;
 
@@ -146,6 +185,17 @@ impl FileAssembler {
     }
 
 
+    ///reassemble_loop
+    /// parameters:
+    ///    - conn_rx: receiving end to get piece messages back from connections
+    ///    - assembler: this is a reference to the shared assembler object
+    ///    - resend_tx: sending end of resend channel to send resend requests to peer
+    ///
+    /// function:
+    /// This method waits until a file is completed or it fails to retrieve a file from underlying
+    /// connections. It takes each piece, checking it is valid with hash and constructs the file.
+    /// If the hash does not line up, or the underlying connection fails, sending a cancel request
+    /// it will transmit a resend request to send_requests.
     async fn reassemble_loop(
         mut conn_rx: mpsc::Receiver<Message>, //used to receive messages back from connection
         assembler: Arc<RwLock<FileAssembler>>,
@@ -153,9 +203,42 @@ impl FileAssembler {
     ) -> Result<(), String> {
 
         let info_hash = assembler.read().await.file_hash.clone();
+        //Todo this might give error
+        let piece_length = assembler.read().await.file_hash.piece_length;
 
 
         loop {
+           let msg = conn_rx.recv().await.ok_or("failed to get message")?;
+           
+           match msg {
+               Message::Piece { index,  piece } => {
+                   println!("Received Piece: {}", index);
+
+                   //We want to verify the piece was not corrupted across transport.
+                   //If it was, we want to resend a request for a new piece.
+                   if  piece.len() == piece_length as usize {
+                       let recvd_piece_hash = hash_piece_data(piece.clone());
+
+                       let expected_hash: [u8; 20] = info_hash.pieces
+                           .get(index as usize)
+                           .cloned()
+                           .ok_or("Could not retrieve piece hash".to_string())?
+                           .hash
+                           .try_into()
+                           .map_err(|_| "Could not convert piece hash".to_string())?;
+
+                       if recvd_piece_hash != expected_hash {
+                           println!("Piece corrupted, sending resend request");
+                           resend_tx
+                               .send(Message::Piece { index, piece })
+                               .await
+                               .map_err(|e| e.to_string())?;
+                           continue;
+                       }
+                   }
+
+                   write_piece_to_part(info_hash.clone(), piece, index)?;
+                   println!("Successfully Wrote: {}", index);
             let msg = conn_rx.recv().await.ok_or("failed to get message")?;
 
             match msg {
@@ -183,6 +266,13 @@ impl FileAssembler {
                     write_piece_to_part(info_hash.clone(), piece, index).map_err(|e| e.to_string())?;
                     println!("Successfully Wrote: {}", index);
 
+                   if file_handler::is_file_complete(info_hash.clone()) {
+                       println!("File complete!");
+                       break;
+                   }
+               },
+               Message::Cancel {seeder,index, begin, length} => {
+                   println!("Failed to get piece removing seeder and trying again");
                     if file_handler::is_file_complete(info_hash.clone()) {
                         break;
                     }
@@ -199,9 +289,6 @@ impl FileAssembler {
                     //does not or cannot provide the data. So we will remove it from seeder list
                     //and resend a request.
 
-                    assembler.write().await.request_txs.remove(seeder as usize);
-                    assembler.write().await.num_connections -= 1;
-                    drop(bad_tx);
 
                     if assembler.read().await.num_connections == 0 {
                         drop(resend_tx);
@@ -220,17 +307,17 @@ impl FileAssembler {
 
         }
 
-        //drop all senders signaling end of connection
-        for request_tx in assembler.write().await.request_txs.drain(0..) {
-            drop(request_tx);
-        }
-        drop(resend_tx);
+       //drop all senders signaling end of connection
+       for request_tx in assembler.write().await.request_txs.drain(0..) {
+           drop(request_tx);
+       }
+       drop(resend_tx);
 
-        file_handler::build_file(info_hash)
-            .map_err(|e| format!("Failed to build file: {}", e))?;
-        println!("piece built");
+       file_handler::build_file(info_hash)
+       .map_err(|e| format!("Failed to build file: {}", e))?;
+       println!("piece built");
 
-        Ok(())
-    }
+       Ok(())
+   }
 
 }

@@ -66,7 +66,7 @@ impl connection::InfoHash {
                 let piece_length = Self::get_piece_length(file_length);
                 // Vector of piece hashes
                 let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
-                
+
                 // Create the new cache file to improve load time
                 let mut file = OpenOptions::new().write(true).open(file_cache)?;
 
@@ -81,7 +81,7 @@ impl connection::InfoHash {
                     let hex_hash = hex::encode(&piece.hash); // converts to hex string
                     writeln!(file, "{}", hex_hash)?;
                 }
-                
+
                 println!("File length: {}", file_length);
                 println!("Piece length: {}", piece_length);
                 println!("Pieces: {:x?}", pieces);
@@ -98,7 +98,7 @@ impl connection::InfoHash {
             // A cached file was identified, load it to save time
             true =>{
                 let mut file = OpenOptions::new().read(true).open(file_cache)?;
-                
+
                 // Load content from the cache file
                 let mut contents = String::new();
                 file.read_to_string(&mut contents)?;

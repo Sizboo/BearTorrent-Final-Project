@@ -23,6 +23,16 @@ pub struct QuicP2PConn {
 
 impl QuicP2PConn {
 
+    ///create_quic_server
+    /// 
+    /// parameters:
+    ///    - TokioUdpSocket: resembles the socket to consume in the connection
+    ///    - peer_id: resembles the peer to accept connections from
+    ///    - server: the connection to introducer server to send certificate
+    ///    - cert_ip: the ip to build the certificate off (self ip)
+    /// 
+    /// function:
+    /// This creates a quinn server endpoint to accept a quic connection.
     pub(crate) async fn create_quic_server(
         socket: TokioUdpSocket,
         peer_id: PeerId,
@@ -79,6 +89,15 @@ impl QuicP2PConn {
         )
     }
 
+    ///create_quic_client
+    /// 
+    /// parameters:
+    ///    - TokioUdpSocket: resembles the socket to consume in the connection
+    ///    - self_addr: holds data of own connection ips
+    ///    - server: the connection to introducer server to get certificate from
+    /// 
+    /// function:
+    /// This creates a quinn client endpoint to create a quic connection.
     pub (crate) async fn create_quic_client (
         socket: TokioUdpSocket,
         self_addr: PeerId,
@@ -119,6 +138,14 @@ impl QuicP2PConn {
         })
     }
     
+    ///quic_listener
+    /// 
+    /// parameters:
+    ///    - file_map: this is the map used to get file information when it is requested by peer
+    /// 
+    /// function:
+    /// This method listens for a connection request, spawning off the send_data task when a connection
+    /// is successfully made. it times out after 4 seconds if no connection request is made. 
     pub(crate) async fn quic_listener(
         &mut self,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>
@@ -148,6 +175,16 @@ impl QuicP2PConn {
         }
     }
     
+    ///send_data()
+    /// 
+    /// parameters:
+    ///    - file_map: this is the file map from which file information is acquired when file
+    ///                is requested.
+    /// 
+    /// function:
+    /// This method waits for incoming streams. It then takes the requests from the peer and then send
+    /// the requested piece. If the piece is not available, it will respond with a Cancel request indicating
+    /// the peer should ask another peer for the data. 
     async fn send_data(
         conn: Connection,
         file_map: Arc<RwLock<HashMap<[u8; 20], InfoHash>>>,
@@ -208,6 +245,12 @@ impl QuicP2PConn {
 
     }
 
+    ///connect_to_peer_server
+    /// 
+    /// parameter: 
+    ///     - peer_addr: the is the address of the peer to connect to
+    ///     - conn_tx: this is the receiving end of the file assembler channel from which to get requests from
+    ///     - conn_rx: 
     pub(crate) async fn connect_to_peer_server(
         &mut self,
         peer_addr: SocketAddr,
@@ -246,37 +289,53 @@ impl QuicP2PConn {
         loop {
             if let Some(msg) = conn_rx.lock().await.recv().await {
                 
-                let (mut send, mut recv) = conn.open_bi().await?;
-                println!("requester opened bi stream!");
-                let conn_tx_clone = conn_tx.clone(); 
-                
-                
-                let (index, length) = match msg {
-                    Message::Request { index,length,.. } => (index, length),
-                    _ => Err("length not found")?,
-                };
+                match conn.open_bi().await {
+                    Ok((mut send, mut recv)) => {
+                        println!("requester opened bi stream!");
+                        let conn_tx_clone = conn_tx.clone();
 
-                let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
-                    tokio::spawn(async move {
-                        println!("requester waiting for length {:?}", length + 9);
-                        let buf = recv.read_to_end(length as usize + 9).await?;
-                        println!("received piece from peer");
 
-                        let msg = Message::decode(buf).ok_or("failed to decode message")?;
+                        let (index, length) = match msg {
+                            Message::Request { index,length,.. } => (index, length),
+                            _ => Err("length not found")?,
+                        };
 
-                        conn_tx_clone.send(msg).await?;
+                        let ret: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> =
+                            tokio::spawn(async move {
+                                println!("requester waiting for length {:?}", length + 9);
+                                let buf = recv.read_to_end(length as usize + 9).await?;
+                                println!("received piece from peer");
 
-                        Ok(())
-                    });
+                                let msg = Message::decode(buf).ok_or("failed to decode message")?;
 
-                send.write_all(&msg.encode()).await?;
-                send.finish()?;
-                println!("sent message requesting: {}", index);
+                                conn_tx_clone.send(msg).await?;
 
-                let res = ret.await?; 
-                if res.is_err() {
-                    eprintln!("{:?}", res);
+                                Ok(())
+                            });
+
+                        send.write_all(&msg.encode()).await?;
+                        send.finish()?;
+                        println!("sent message requesting: {}", index);
+
+                        let res = ret.await?;
+                        if res.is_err() {
+                            eprintln!("{:?}", res);
+                        } 
+                    },
+                    //if connection errors, we want to resend the requests to another connection
+                    //this loops it back to file_assembler so it can handle removing this connection
+                    //and resend a new request to a viable connection
+                    Err(_) => {
+                        println!("Connection Error sending Cancel Request");
+                        let cancel_req = match msg {
+                            Message::Request { seeder, index, begin, length, .. } =>
+                                Message::Cancel { seeder, index, begin, length },
+                            _ => continue,
+                        };
+                        conn_tx.send(cancel_req).await?;
+                    } 
                 }
+                
             } else {
                 println!("connection closed");
                 conn.close(0u32.into(), b"closing connection gracefully");
