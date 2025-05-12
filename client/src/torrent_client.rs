@@ -1,6 +1,5 @@
 use std::cmp::min;
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddrV4, ToSocketAddrs};
 use std::sync::Arc;
 use local_ip_address::local_ip;
@@ -30,7 +29,6 @@ impl TorrentClient {
     pub async fn new() -> Result<TorrentClient, String> {
     ///This method creates a new torrent client, establishing a connection to our underlying gRPC server
     /// used both as an introducer and relay.
-    pub (crate) async fn new() -> Result<TorrentClient, Box<dyn std::error::Error>> {
         //tls config
         //webki roots uses Mozilla's certificate store
         let tls = ClientTlsConfig::new()
@@ -69,21 +67,12 @@ impl TorrentClient {
         )
     }
 
-    ///This method registers a new peer connection by sending the public and private ip and port numbers
-    /// so that other peers can attempt to make a peer-to-peer connection with this client.
-    async fn register_new_connection(&mut self) -> Result<PeerConnection, Box<dyn std::error::Error>> {
-        //bind port and get public facing id
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-        let stun_server = "stun.l.google.com:19302".to_socket_addrs().unwrap().filter(|x|x.is_ipv4()).next().unwrap();
-
-
-
-
     pub fn is_connected(&self) -> bool {
         !self.uid.uid.is_empty()
     }
 
-
+    ///This method registers a new peer connection by sending the public and private ip and port numbers
+    /// so that other peers can attempt to make a peer-to-peer connection with this client.
     async fn register_new_connection(&mut self) -> Result<PeerConnection, String> {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")
             .map_err(|e| format!("UDP bind failed: {}", e))?;
@@ -175,7 +164,7 @@ impl TorrentClient {
 
     ///seeding is used as a listening process to begin sending data upon request
     /// it simply awaits a server request for it to send data
-    pub async fn seeding(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn seeding(&mut self) -> Result<(), String> {
 
         loop {
             let mut peer_connection = self.register_new_connection().await?;
@@ -243,7 +232,7 @@ impl TorrentClient {
             let request_rx = assembler.write().await.subscribe_new_connection();
             let peer_id = peer_list[i];
             let handle = tokio::spawn(async move {
-                
+
                 let res = peer_connection.requester_connection(peer_id,conn_tx, request_rx).await;
                 if res.is_err() {
                     eprintln!("connection error: {}", res.err().unwrap());
@@ -336,6 +325,7 @@ impl TorrentClient {
     pub async fn remove_client(&self) -> Result<(), String> {
     ///This method delists a client entirely from the server so that no peer may try making a request to this client.
         let mut server_connection = self.client.clone();
+        let _ = server_connection.delist_client(self.uid.clone()).await;
 
         server_connection.delist_client(self.uid.clone()).await;
         self.close_down.notify_waiters();
@@ -344,3 +334,4 @@ impl TorrentClient {
     }
 
 }
+

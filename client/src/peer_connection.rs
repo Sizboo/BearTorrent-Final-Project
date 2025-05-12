@@ -41,7 +41,7 @@ impl PeerConnection {
         println!("Starting Send to peer ip: {}, port: {}", peer_addr.ip(), peer_addr.port());
 
         let send_task = tokio::spawn(async move {
-            for _ in 0..200 {
+            for _i in 0..200 {
                 let res = socket_arc.send_to(punch_string, peer_addr).await;
 
                 if res.is_err() {

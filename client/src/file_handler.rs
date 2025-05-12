@@ -235,6 +235,7 @@ fn get_file(file_name: String) -> PathBuf {
 }
 
 // Create the files directory if it doesn't exist
+#[allow(dead_code)]
 fn get_client_files_dir() -> std::io::Result<PathBuf> {
     let dir = dirs::download_dir().unwrap().join("TorrentFiles").join("files");
     if !dir.exists() {
@@ -244,6 +245,7 @@ fn get_client_files_dir() -> std::io::Result<PathBuf> {
 }
 
 // Create the cache directory for .part and .info files if it doesn't exist
+#[allow(dead_code)]
 fn get_client_cache_dir() -> std::io::Result<PathBuf> {
     let dir = dirs::download_dir().unwrap().join("TorrentFiles").join("cache");
     if !dir.exists() {
@@ -255,6 +257,7 @@ fn get_client_cache_dir() -> std::io::Result<PathBuf> {
 
 // Checks the client for Torrent directory containing cache and files.
 // If they don't exist, they are created.
+#[allow(dead_code)]
 fn verify_client_dir_setup() -> () {
     // Create the cache directory for .part and .info files
     let _cache = get_client_cache_dir();
@@ -315,7 +318,7 @@ pub(crate) fn delete_file(file_name: String) -> std::io::Result<()> {
         .join("files")
         .join(&file_name);
 
-    let (info_path, _) = get_info_file(file_name.clone());
+    let (_info_path, _) = get_info_file(file_name.clone());
     let part_path = get_part_file(file_name.clone());
     let (cache_path, _) = get_file_cache(file_name);
 

@@ -15,14 +15,14 @@ pub struct TurnFallback {
 
 impl TurnFallback {
 
-    /// start_seeding(
-    ///     turn_client: a client's way to access the turn service on the server
-    ///     seeder_id: their peer_id
-    ///     leecher_id: the peer_id of the leecher they are registering for the TURN service with
-    ///     file_map: the map used to identify files
-    /// )
-    ///
-    /// function to start seeding via our TURN service on the server
+    // start_seeding(
+    //     turn_client: a client's way to access the turn service on the server
+    //     seeder_id: their peer_id
+    //     leecher_id: the peer_id of the leecher they are registering for the TURN service with
+    //     file_map: the map used to identify files
+    // )
+    //
+    // function to start seeding via our TURN service on the server
     pub async fn start_seeding(
         mut turn_client: TurnClient<tonic::transport::Channel>,
         seeder_id: PeerId,
