@@ -160,36 +160,48 @@ impl QuicP2PConn {
                     return Ok(());
                 },
                 stream = conn.accept_bi() => {
-                    let (mut send, mut recv) = stream?;
-                    println!("Seeder accepted bi stream!");
+                    match stream {
+                        Ok((mut send, mut recv)) => {
+                           println!("Seeder accepted bi stream!");
 
-                    let mut req_buf : [u8; 37] = [0; 37];
-                    recv.read_exact(&mut req_buf).await?;
-                    println!("Client received req {:?}", req_buf);
+                            let mut req_buf : [u8; 37] = [0; 37];
+                            recv.read_exact(&mut req_buf).await?;
+                            println!("Client received req {:?}", req_buf);
 
-                    let mut request = None;
-                    if let Some(msg) = Message::decode(Vec::from(req_buf)) {
-                        request = match msg {
-                            Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
-                            _ => None,
-                        };
-                    }
-                    let (index, begin, length, hash) = request.ok_or("failed to decode request")?;
+                            let mut request = None;
+                            if let Some(msg) = Message::decode(Vec::from(req_buf)) {
+                                request = match msg {
+                                    Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
+                                    _ => None,
+                                };
+                            }
+                            let (index, begin, length, hash) = request.ok_or("failed to decode request")?;
 
-                    let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?;
+                            let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?;
 
 
-                    let piece = read_piece_from_file(info_hash, index)?;
-                    println!("Got piece vector");
+                            let piece = read_piece_from_file(info_hash, index)?;
+                            println!("Got piece vector");
 
-                    let msg = Message::Piece { index, piece };
+                            let msg = Message::Piece { index, piece };
 
-                    let msg = &msg.encode();
-                    let len = msg.len();
+                            let msg = &msg.encode();
+                            let len = msg.len();
 
-                    send.write_all(msg).await?;
-                    send.finish()?;
-                    println!("Seeder sent piece of length {:?}", len);
+                            send.write_all(msg).await?;
+                            send.finish()?;
+                            println!("Seeder sent piece of length {:?}", len);
+                        },
+                        Err(e) => return match e {
+                            quinn::ConnectionError::ApplicationClosed(closed) => {
+                                println!("Connection Closed: {:?}", closed);
+                                Ok(())
+                            },
+                            other => {
+                                Err(Box::from(other.to_string()))
+                            }
+                        }
+                    } 
                 }
             }
         }
