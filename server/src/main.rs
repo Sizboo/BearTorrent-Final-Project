@@ -1,16 +1,15 @@
 mod turn;
 mod connection;
 
-use std::{env, collections::HashMap, sync::Arc};
+use std::{env, sync::Arc};
 use std::time::Duration;
 use dashmap::DashMap;
 use tonic::{transport::Server, Code, Request, Response, Status};
 use connection::connection::*;
 use crate::connector_server::{Connector, ConnectorServer};
 use crate::turn_server::TurnServer;
-use tokio::sync::{Mutex, mpsc, Notify, watch, oneshot};
-use tokio::sync::RwLock;
-use tokio::time::{sleep, timeout};
+use tokio::sync::{mpsc, watch};
+use tokio::time::{sleep};
 use uuid::Uuid;
 use crate::turn::TurnService;
 
@@ -18,7 +17,7 @@ use crate::turn::TurnService;
 #[derive(Debug, Default)]
 pub struct ConnectionService {
     client_registry: Arc<DashMap<ClientId, Option<PeerId>>>,
-    file_tracker: Arc<DashMap<FileHash, InfoHash>>, 
+    file_tracker: Arc<DashMap<FileHash, InfoHash>>,
     seeder_list: Arc<DashMap<FileHash, Vec<ClientId>>>,
     seed_notifier: Arc<DashMap<PeerId, mpsc::Sender<PeerId>>>,
     cert_sender: Arc<DashMap<PeerId, mpsc::Sender<Cert>>>,
@@ -52,7 +51,10 @@ impl Connector for ConnectionService {
         }
     }
 
-    async fn send_file_request(&self, request: Request<ConnectionIds>) -> Result<Response<()>, Status> {
+    async fn send_file_request(
+        &self,
+        request: Request<ConnectionIds>
+    ) -> Result<Response<()>, Status> {
         let r = request.into_inner();
         //this is the connection id retrieved from get_file_peer_list() of the peer seeding
         let seeder_peer_id = r.connection_peer.ok_or(Status::invalid_argument("missing peer id"))?;
@@ -83,14 +85,16 @@ impl Connector for ConnectionService {
 
     ///this function is used by clients willing to share data to get peers who request data.
     /// clients should listen to this service at all times they are willing to send.
-    //todo consider renaming
-    async fn seed(&self, request: Request<PeerId>) -> Result<Response<PeerId>, Status> {
+    async fn seed(
+        &self,
+        request: Request<PeerId>
+    ) -> Result<Response<PeerId>, Status> {
         let self_peer_id = request.into_inner();
-        
+
         let (peer_id_tx, mut peer_id_rx) = mpsc::channel::<PeerId>(1);
-        
+
         self.seed_notifier.insert(self_peer_id, peer_id_tx);
-        
+
         //get id of client requesting file
         let peer_id= peer_id_rx.recv().await
             .ok_or(Status::new(Code::Internal, "Failed to receive client id"))?;
@@ -120,7 +124,10 @@ impl Connector for ConnectionService {
     /// init_hole_punch() is used to notify a seeding peer that they should begin the udp hole punching procedure.
     /// This function should be called right before the calling peer initiates their own hole punching procedure
     /// as UDP hole punching is time-sensitive.
-    async fn init_punch(&self, request: Request<PeerId>) -> Result<Response<()>, Status> {
+    async fn init_punch(
+        &self,
+        request: Request<PeerId>
+    ) -> Result<Response<()>, Status> {
        
         let peer_id = request.into_inner();
   
@@ -153,20 +160,20 @@ impl Connector for ConnectionService {
 
         let file_hash = r.hash.ok_or(Status::invalid_argument("missing file hash"))?;
         let info_hash = r.info_hash.ok_or(Status::invalid_argument("missing info hash"))?;
-        
-        
+
+
         let client_id = match r.id {
             Some(id) => id,
             None => return Err(Status::invalid_argument("Client missing")),
         };
 
         self.file_tracker.insert(file_hash.clone(), info_hash);
-        
+
         self.seeder_list
             .entry(file_hash)
             .or_insert_with(Vec::new)
             .push(client_id.clone());
-        
+
         Ok( Response::new(client_id) )
     }
 
@@ -199,7 +206,10 @@ impl Connector for ConnectionService {
     
     /// update_registered_peer_id() is used to update the peer id of a client that has been registered
     /// this is used when a client changes their ip address
-    async fn update_registered_peer_id(&self, request: Request<FullId>) -> Result<Response<ClientId>, Status> {
+    async fn update_registered_peer_id(
+        &self,
+        request: Request<FullId>
+    ) -> Result<Response<ClientId>, Status> {
     
         let r = request.into_inner();
         let self_id = r.self_id.ok_or(Status::invalid_argument("self id not provided"))?;
@@ -211,7 +221,7 @@ impl Connector for ConnectionService {
     
     }
 
-    
+
     /// get_cer() is used by the client end of the quic connection to get the server's self-signed certificate
     /// it should be called and waited upon once init_cert_sender() has been called
     /// get_cert() SHOULD NOT be called unless init_cert_sender() has completed
@@ -220,7 +230,7 @@ impl Connector for ConnectionService {
         request: Request<PeerId>
     ) -> Result<Response<Cert>, Status> {
         let self_addr = request.into_inner();
-        
+
         let (cert_tx, mut cert_rx) = mpsc::channel::<Cert>(1);
 
         self.cert_sender.insert(self_addr, cert_tx);
@@ -240,7 +250,7 @@ impl Connector for ConnectionService {
             Some(id) => id,
             None => return Err(Status::invalid_argument("peer id not returned upon signal from server"))?
         };
-        
+
         for i in 0..5 {
             match self.cert_sender.remove(&peer_id) {
                 Some(entry) => {
@@ -254,7 +264,7 @@ impl Connector for ConnectionService {
                     if i == 4 {
                         return Err(Status::invalid_argument("Cert sender not registered"))?;
                     }
-                    continue  
+                    continue
                 }
             }
         }
@@ -273,7 +283,7 @@ impl Connector for ConnectionService {
         let client_id = registry
             .iter()
             .find_map(|entry| {
-                let (client_id, saved_peer) = entry.pair(); 
+                let (client_id, saved_peer) = entry.pair();
                 if saved_peer.unwrap() == peer {
                     Some(client_id.clone())
                 } else {
@@ -301,6 +311,65 @@ impl Connector for ConnectionService {
             }
         ))
         
+    }
+
+    async fn delete_file(
+        &self,
+        request: Request<FileDelete>
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        let self_id = req.id.ok_or(Status::invalid_argument("missing self id"))?;
+        let file_hash = req.hash.ok_or(Status::invalid_argument("missing file hash"))?;
+        
+        if let Some(mut entry) = self.seeder_list.get_mut(&file_hash) {
+            let seeders = entry.value_mut();
+            seeders.retain(|client_id| *client_id != self_id );
+           
+            
+            //If this was the last seeder who had this file, we want ot remove it from both
+            //file_tracker and seeder_list. So that it is no longer advertised to peers.
+            if seeders.is_empty() {
+                drop(entry);
+                self.seeder_list.remove(&file_hash);
+                self.file_tracker.remove(&file_hash);
+            }
+        }
+
+       Ok(Response::new(()))
+    }
+    
+    async fn delist_client(
+        &self,
+        request: Request<ClientId>,
+    ) -> Result<Response<()>, Status> {
+        let client_id = request.into_inner();
+        
+        if let Some(client_registry_entry) = self.client_registry.remove(&client_id) {
+            
+            //if peer_id is found anywhere remove it
+            if let Some(peer_id) = client_registry_entry.1 {
+                if self.seed_notifier.contains_key(&peer_id) {
+                    self.seed_notifier.remove(&peer_id);    
+                }
+                if self.cert_sender.contains_key(&peer_id) {
+                    self.cert_sender.remove(&peer_id);
+                }
+                if self.init_hole_punch.contains_key(&peer_id) {
+                    self.init_hole_punch.remove(&peer_id);
+                }
+            }
+            
+            //remove from seeding list
+            self.seeder_list.iter_mut()
+                .for_each(|mut entry| {
+                    entry.value_mut().retain(|id| *id != client_id);
+                    if entry.value().is_empty() {
+                        self.file_tracker.remove(entry.key());
+                    }
+                });
+        }
+
+        Ok(Response::new(()))
     }
 }
 

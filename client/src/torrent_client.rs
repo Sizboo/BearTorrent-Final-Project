@@ -6,11 +6,12 @@ use std::sync::Arc;
 use local_ip_address::local_ip;
 use stunclient::StunClient;
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tonic::Request;
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::connection::connection::{connector_client, turn_client, ClientId, ClientRegistry, FileMessage, FullId, PeerId, InfoHash, FileHash};
+use crate::connection::connection::*;
 use crate::file_assembler::FileAssembler;
+use crate::file_handler;
 use crate::file_handler::{get_info_hashes};
 use crate::peer_connection::PeerConnection;
 
@@ -19,7 +20,8 @@ pub struct TorrentClient {
     pub(crate) client: connector_client::ConnectorClient<Channel>,
     pub(crate) turn: turn_client::TurnClient<Channel>,
     pub(crate) uid: ClientId,
-    pub(crate) file_hashes: Arc<RwLock<HashMap<[u8;20], InfoHash>>>
+    pub(crate) file_hashes: Arc<RwLock<HashMap<[u8;20], InfoHash>>>,
+    close_down: Arc<Notify>,
 }
 
 const GCLOUD_URL: &str = "https://helpful-serf-server-1016068426296.us-south1.run.app:";
@@ -52,6 +54,7 @@ impl TorrentClient {
                 turn,
                 uid,
                 file_hashes: Arc::new(RwLock::new(file_hashes)),
+                close_down: Arc::new(Notify::new()),
             }
         )
     }
@@ -112,7 +115,10 @@ impl TorrentClient {
             },
         ) 
     }
-    async fn update_registered_peer_id(&mut self, self_addr: PeerId) -> Result<(), Box<dyn std::error::Error>> {
+    async fn update_registered_peer_id(
+        &mut self, 
+        self_addr: PeerId
+    ) -> Result<(), Box<dyn std::error::Error>> {
         
         let mut server_conn = self.client.clone();
         
@@ -143,28 +149,38 @@ impl TorrentClient {
 
             // calls get_peer
             println!("Seeding with {:?}", peer_connection.self_addr);
-            let response = server_client.seed(peer_connection.self_addr.clone()).await;
             
-            // waits for response from get_peer
-            match response {
-                Ok(res) => {
-                    tokio::spawn(async move {
-                        let res = peer_connection.seeder_connection(res).await;
-                        if res.is_err() {
-                            println!("Connect Failed: {}", res.err().unwrap());
-                        }
-                    });
-
+            tokio::select! {
+                _ = self.close_down.notified() => {
+                    println!("Shutting down");
+                    return Ok(());
                 }
-                Err(e) => {
-                    eprintln!("Failed to get peer: {:?}", e);
+                response = server_client.seed(peer_connection.self_addr.clone()) => {
+                    // waits for response from get_peer
+                    match response {
+                        Ok(res) => {
+                            tokio::spawn(async move {
+                                let res = peer_connection.seeder_connection(res).await;
+                                if res.is_err() {
+                                    println!("Connect Failed: {}", res.err().unwrap());
+                                }
+                            });
+
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get peer: {:?}", e);
+                        }
+                    }
                 }
             }
         }
     }
 
     ///request is a method used to request necessary connection details from the server
-    pub async fn file_request(&mut self, file_hash: InfoHash) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn file_request(
+        &mut self, 
+        file_hash: InfoHash
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
 
         let peer_list = client.get_file_peer_list(
@@ -204,7 +220,10 @@ impl TorrentClient {
         Ok(())
     }
 
-    pub async fn advertise(&self, info_hash: InfoHash) -> Result<ClientId, Box<dyn std::error::Error>> {
+    pub async fn advertise(
+        &self, 
+        info_hash: InfoHash
+    ) -> Result<ClientId, Box<dyn std::error::Error>> {
         let mut client = self.client.clone();
         
         let file_hash = FileHash { hash: Vec::from(info_hash.get_hashed_info_hash())};
@@ -240,11 +259,32 @@ impl TorrentClient {
         Ok(info_hashes)
 
     }
-
-    /// announce is a method used update server with connection details
-    /// this will primarily be used by init() and called on a periodic basis
-    /// this is essentially a "keep alive" method
-    pub async fn announce(&self) -> Result<(), Box<dyn std::error::Error>> {
+    
+    pub async fn delete_file(
+        &self,
+        file_hash: InfoHash
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut server_connection = self.client.clone();
+        let hash = FileHash { hash: Vec::from(file_hash.get_hashed_info_hash())};
+        let file_delete = FileDelete {
+            id: Some(self.uid.clone()),
+            hash: Some(hash),
+        };
+       
+        server_connection.delete_file(file_delete).await?;
+        
+        file_handler::delete_file(file_hash.name)?;
+        
         Ok(())
     }
+    
+    pub async fn remove_client(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut server_connection = self.client.clone();
+        
+        server_connection.delist_client(self.uid.clone()).await?;
+        self.close_down.notify_waiters();
+        
+        Ok(())
+    }
+
 }
