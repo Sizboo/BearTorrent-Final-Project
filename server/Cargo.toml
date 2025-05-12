@@ -7,6 +7,7 @@ edition = "2021"
 prost = "0.13.5"
 tonic = "0.13.0"
 tokio = { version = "1.19.2", features = ["full"] }
+hex = "0.4.3"
 
 # this is only for stubbed out main before we actually build server
 warp = "0.3.7"
