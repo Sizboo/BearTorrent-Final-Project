@@ -65,7 +65,7 @@ impl connection::InfoHash {
                 // Size of the pieces
                 let piece_length = Self::get_piece_length(file_length);
                 // Vector of piece hashes
-                let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
+                let pieces = Self::get_piece_hashes(path, piece_length as usize, file_length as usize)?;
                 
                 // Create the new cache file to improve load time
                 let mut file = OpenOptions::new().write(true).open(file_cache)?;
@@ -140,7 +140,7 @@ impl connection::InfoHash {
     }
 
     // Generates a vector containing 20-byte SHA1 hash of each piece from a file
-    fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize) -> std::io::Result<Vec<connection::PieceHash>>{
+    fn get_piece_hashes<P: AsRef<Path>>(path: P, piece_length: usize, file_length: usize) -> std::io::Result<Vec<connection::PieceHash>>{
         let mut file_reader = BufReader::new(File::open(path)?);
         let mut buf = vec![0u8;piece_length];
         let mut pieces: Vec<[u8;20]> = Vec::new();
@@ -149,12 +149,14 @@ impl connection::InfoHash {
         loop {
 
             let mut bytes_read = 0; // total bytes read
-
+            
             // Read whole file
             while bytes_read < piece_length{
                 // read segments of the file as pieces
-                let n = file_reader.read(&mut buf[bytes_read..piece_length])?;
-                if n == 0 { // EOF
+                buf = vec![0u8;piece_length];
+                let n = file_reader.read(&mut buf[0..piece_length])?;
+                if n == 0 || buf.iter().all(|value| *value == 0) { // EOF
+                    bytes_read = 0;
                     break;
                 }
                 bytes_read += n;
@@ -311,6 +313,7 @@ pub(crate) fn hash_piece_data(buf: Vec<u8>) -> [u8;20]{
     // Finalize result of the hash, append 20-byte result to the pieces vector
     let result = hasher.finalize();
     let bytes: [u8; 20] = result.try_into().unwrap();
+    println!("{:?}", buf.clone());
     bytes.into()
 }
 
