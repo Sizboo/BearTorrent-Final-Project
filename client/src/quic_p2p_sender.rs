@@ -171,26 +171,24 @@ impl QuicP2PConn {
                             let mut request = None;
                             if let Some(msg) = Message::decode(Vec::from(req_buf)) {
                                 request = match msg {
-                                    Message::Request { index, begin, length, hash } => Some((index, begin, length, hash)),
+                                    Message::Request { seeder, index, begin, length, hash } => Some((seeder, index, begin, length, hash)),
                                     _ => None,
                                 };
                             }
-                            let (index, begin, length, hash) = request.ok_or("failed to decode request")?;
+                            let (seeder, index, begin, length, hash) = request.ok_or("failed to decode request")?;
 
                             let info_hash = file_map.read().await.get(&hash).cloned().ok_or("seeder missing file info")?;
 
 
-                            let piece = read_piece_from_file(info_hash, index)?;
-                            println!("Got piece vector");
+                            let msg = match read_piece_from_file(info_hash, index) {
+                                //if we get the piece all is well!
+                                Ok(piece) => Message::Piece { index, piece },
+                                //if we cannot get the piece leecher needs to pivot and ask another seeder
+                                Err(_) => Message::Cancel {seeder, index, begin, length},
+                            };
 
-                            let msg = Message::Piece { index, piece };
-
-                            let msg = &msg.encode();
-                            let len = msg.len();
-
-                            send.write_all(msg).await?;
+                            send.write_all(&msg.encode()).await?;
                             send.finish()?;
-                            println!("Seeder sent piece of length {:?}", len);
                         },
                         Err(e) => return match e {
                             quinn::ConnectionError::ApplicationClosed(closed) => {
@@ -262,9 +260,9 @@ impl QuicP2PConn {
                         let buf = recv.read_to_end(length as usize + 9).await?;
                         println!("received piece from peer");
 
-                        let piece = Message::decode(buf).ok_or("failed to decode message")?;
+                        let msg = Message::decode(buf).ok_or("failed to decode message")?;
 
-                        conn_tx_clone.send(piece).await?;
+                        conn_tx_clone.send(msg).await?;
 
                         Ok(())
                     });
