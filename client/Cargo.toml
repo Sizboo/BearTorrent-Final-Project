@@ -18,7 +18,8 @@ tokio-util = "0.7.15"
 tonic = { version = "0.13.0", features = ["_tls-any", "tls-webpki-roots"] }
 webpki-roots = "0.26.8"
 sha1 = "0.10.6"
-hex = "0.4"
+hex = "0.4.3"
+
 
 [build-dependencies]
 tonic-build = "0.13.0"

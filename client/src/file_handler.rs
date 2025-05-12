@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions, rename, remove_file};
+use std::fs::{DirEntry, File, read_dir, exists, create_dir_all, OpenOptions, rename, remove_file, copy};
 use sha1::{Sha1, Digest};
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{read_to_string, BufReader, Read, Seek, SeekFrom, Write};
+use std::iter::Map;
 use std::path::{Path, PathBuf};
 use crate::connection::*;
-
+use hex::encode;
 // #[derive(Debug, Clone)]
 // pub struct InfoHash{
 //     pub(crate) name: String, // Name of the file
@@ -19,6 +20,7 @@ pub struct Status{
     pub(crate) pieces_status: Vec<u8> // Using u8 for simplified reading and writing
 }
 
+// This struct is used to track the status of the pieces, whether they have been built or not
 impl Status{
 
     // Converts the status array to a vector of bools for easy use as needed
@@ -31,39 +33,107 @@ impl Status{
         bool_vec
     }
 
+    // Checks whether all the pieces have been assembled
     pub fn has_all_pieces(&self) -> bool {
         if self.pieces_status.is_empty(){
             return true;
         }
+        // Go through all piece values and return whether they are all set to true
         self.pieces_status.iter().all(|value| *value == 1)
     }
 }
 
+// The InfoHash struct stores necessary information for requesting and advertising
+// a client's file. It closely resembles a .torrent file
 impl connection::InfoHash {
-    // Generate the info hash struct given a file
+    // Generate the info hash struct given a file from resources/files
     pub fn new(file: DirEntry) -> std::io::Result<Self> {
         let path = file.path(); // PathBuf of the file
 
         // Name of the file
-        let name = path.file_name().unwrap().to_str().unwrap().to_string(); // TODO less unwraps?
-        // Byte length of the file
-        let file_length = file.path().metadata()?.len();
-        // Size of the pieces
-        let piece_length = Self::get_piece_length(file_length);
-        // Vector of piece hashes
-        let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
 
-        println!("File length: {}", file_length);
-        println!("Piece length: {}", piece_length);
-        println!("Pieces: {:x?}", pieces);
-        println!("File name: {}", name);
+        let (file_cache, is_new) = get_file_cache(name.clone());
+        match is_new {
 
-        Ok(connection::InfoHash{
-            name,
-            file_length,
-            piece_length,
-            pieces
-        })
+            // Generate the missing .fileinfo file
+            false =>{
+                // Byte length of the file
+                let file_length = file.path().metadata()?.len();
+                // Size of the pieces
+                let piece_length = Self::get_piece_length(file_length);
+                // Vector of piece hashes
+                let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
+
+                // Create the new cache file to improve load time
+                let mut file = OpenOptions::new().write(true).open(file_cache)?;
+
+                // Write each field as newlines, this helps since we have 2 variable length fields
+                writeln!(file, "name: {}", name.clone())?;
+                writeln!(file, "file_length: {}", file_length.clone())?;
+                writeln!(file, "piece_length: {}", piece_length.clone())?;
+                writeln!(file, "pieces:")?;
+
+                // Write each piece on a newline
+                for piece in &pieces {
+                    let hex_hash = hex::encode(&piece.hash); // converts to hex string
+                    writeln!(file, "{}", hex_hash)?;
+                }
+
+                println!("File length: {}", file_length);
+                println!("Piece length: {}", piece_length);
+                println!("Pieces: {:x?}", pieces);
+                println!("File name: {}", name);
+
+                Ok(connection::InfoHash{
+                    name,
+                    file_length,
+                    piece_length,
+                    pieces
+                })
+
+            }
+            // A cached file was identified, load it to save time
+            true =>{
+                let mut file = OpenOptions::new().read(true).open(file_cache)?;
+
+                // Load content from the cache file
+                let mut contents = String::new();
+                file.read_to_string(&mut contents)?;
+                let mut lines = contents.lines();
+
+                // Gets the name entry
+                let name = lines.next().ok_or("Missing name").unwrap().strip_prefix("name: ").ok_or("Invalid name line").unwrap().to_string();
+
+                // Gets the file_length entry
+                let file_length = lines.next().ok_or("Missing file_length").unwrap().strip_prefix("file_length: ").ok_or("Invalid file_length").unwrap().parse::<u64>().unwrap();
+
+                // Gets the piece_length entry
+                let piece_length = lines.next().ok_or("Missing piece_length").unwrap().strip_prefix("piece_length: ").ok_or("Invalid piece_length").unwrap().parse::<u32>().unwrap();
+
+                // Gets the piece entry
+                let header = lines.next().ok_or("Missing 'pieces:' line").unwrap();
+                if header.trim() != "pieces:" {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid header"));
+                }
+
+                // Read pieces
+                let mut pieces = Vec::new();
+                for line in lines {
+                    let bytes = hex::decode(line).unwrap();
+                    pieces.push(connection::PieceHash { hash: bytes });
+                }
+
+                println!("Loaded {:?} from cache", name.clone());
+
+                Ok(connection::InfoHash{
+                    name,
+                    file_length,
+                    piece_length,
+                    pieces
+                })
+            }
+        }
 
     }
 
@@ -93,13 +163,7 @@ impl connection::InfoHash {
             }
 
             // Hash the piece of data that was read
-            let mut hasher = Sha1::new();
-            hasher.update(&buf[..]); // update hash with any data in current buffer
-
-            // Finalize result of the hash, append 20-byte result to the pieces vector
-            let result = hasher.finalize();
-            let bytes: [u8; 20] = result.try_into().unwrap();
-            pieces.push(bytes.into());
+            pieces.push(hash_piece_data(buf.to_vec()));
         }
         let piece_hashes = pieces.iter().map(|piece| connection::PieceHash{
             hash: piece.to_vec()
@@ -135,39 +199,12 @@ impl connection::InfoHash {
         let bytes: [u8; 20] = result.try_into().unwrap();
         bytes
     }
-
-    // pub fn get_server_info_hash(&self) ->  connection::InfoHash {
-    //
-    //     let pieces = self.pieces.iter().map(|x| connection::PieceHash{
-    //         hash: Vec::from(x)
-    //     }).collect::<Vec<_>>();
-    //
-    //     connection::InfoHash {
-    //         name: self.name.clone(),
-    //         file_length: self.file_length.clone(),
-    //         piece_length: self.piece_length.clone() as u64,
-    //         pieces,
-    //     }
-    // }
-    //
-    // pub fn server_to_client_hash(server_info_hash: connection::InfoHash) -> InfoHash {
-    //
-    //     let pieces = server_info_hash.pieces.iter().map(|x| x.hash.clone().try_into().unwrap()).collect::<Vec<_>>();
-    //
-    //     InfoHash {
-    //         name: server_info_hash.name,
-    //         file_length: server_info_hash.file_length,
-    //         piece_length: server_info_hash.piece_length as u32,
-    //         pieces,
-    //     }
-    // }
 }
 
 // Checks if a file exists, if it doesn't then it is created.
 // Returns the PathBuf to this file
 fn get_temp_file(file_name: String, extension: String, src: String) -> std::io::Result<(PathBuf, bool)> {
     let temp_file_name = format!("resources/{}/{}{}", src, file_name, extension);
-    println!("Temp file name: {}", temp_file_name);
     let temp_file:(PathBuf, bool) = match exists(Path::new(&temp_file_name)) {
         Ok(true) => (PathBuf::from(temp_file_name), true),
         Ok(false) => {
@@ -185,18 +222,26 @@ fn get_part_file(file_name: String) -> PathBuf {
     path
 }
 
+// Gets the .info file
 fn get_info_file(file_name: String) -> (PathBuf, bool) {
     let (path, is_new) = get_temp_file(file_name, ".info".to_string(), "cache".to_string()).unwrap();
     (path, is_new)
 }
 
+// Gets the .infofile file
+fn get_file_cache(file_name: String) -> (PathBuf, bool) {
+    let (path, is_new) = get_temp_file(file_name, ".filecache".to_string(), "cache".to_string()).unwrap();
+    (path, is_new)
+}
+
+// Gets the actual file
 fn get_file(file_name: String) -> PathBuf {
     let (path, is_new) = get_temp_file(file_name, "".to_string(), "files".to_string()).unwrap();
     path
 }
 
 // Create the files directory if it doesn't exist
-fn get_client_files_dir() -> std::io::Result<PathBuf> {
+fn get_client_files_dir() -> std::io::Result<(PathBuf)> {
     let dir = Path::new("resources/files");
     if !dir.exists(){
         create_dir_all(dir)?;
@@ -205,7 +250,7 @@ fn get_client_files_dir() -> std::io::Result<PathBuf> {
 }
 
 // Create the cache directory for .part and .info files if it doesn't exist
-fn get_client_cache_dir() -> std::io::Result<PathBuf> {
+fn get_client_cache_dir() -> std::io::Result<(PathBuf)> {
     let dir = Path::new("resources/cache");
     if !dir.exists(){
         create_dir_all(dir)?;
@@ -253,6 +298,54 @@ fn get_info_status(info_hash: connection::InfoHash) -> Status {
             }
         }
     }
+}
+
+// This function generates a 20-btye SHA1 has of a vector of u8's
+pub(crate) fn hash_piece_data(buf: Vec<u8>) -> [u8;20]{
+    let mut hasher = Sha1::new();
+    hasher.update(&buf[..]); // update hash with any data in current buffer
+
+    // Finalize result of the hash, append 20-byte result to the pieces vector
+    let result = hasher.finalize();
+    let bytes: [u8; 20] = result.try_into().unwrap();
+    bytes.into()
+}
+
+// Deletes a file and its associated cache files from resources
+pub(crate) fn delete_file(file_name: String) -> std::io::Result<()> {
+    let file_path = format!("resources/files/{}", file_name);
+    let (info_path, _) = get_info_file(file_name.clone());
+    let part_path = get_part_file(file_name.clone());
+    let (cache_path,_) = get_file_cache(file_name);
+    if exists(Path::new(&file_path))? {
+        match remove_file(file_path){
+            Err(e) => eprintln!("{}", e),
+            _ => {}
+        };
+        match remove_file(part_path){
+            Err(e) => eprintln!("{}", e),
+            _ => {}
+        };
+        match remove_file(cache_path){
+            Err(e) => eprintln!("{}", e),
+            _ => {}
+        };
+    }
+    Ok(())
+}
+
+// Copies a file from the frontend to the resource directory, given a direct path
+pub(crate) fn add_file(path: String) -> std::io::Result<()> {
+    let file_path = Path::new(&path);
+    let dest_folder = Path::new("resources/files");
+    let dest = dest_folder.join(file_path.file_name().unwrap());
+
+    println!("Copying file into: {:?}", dest);
+    match copy(file_path, dest){
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
+    }
+
 }
 
 // If the file can be completed, the .info cache file is removed and the .part
@@ -364,7 +457,7 @@ pub(crate) fn get_info_hashes() -> std::io::Result<HashMap<[u8;20], connection::
             results.insert(temp_infohash.get_hashed_info_hash(), temp_infohash);
         }
     }
-
+    
     // Return the list of hashes
     Ok(results)
 

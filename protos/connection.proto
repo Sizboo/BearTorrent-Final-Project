@@ -3,21 +3,21 @@ import "google/protobuf/empty.proto";
 package connection;
 
 service Connector {
-    rpc get_file_peer_list (InfoHash) returns (PeerList);
-    rpc send_file_request (FullId) returns (google.protobuf.Empty);
+    rpc get_file_peer_list (FileHash) returns (PeerList);
+    rpc send_file_request (ConnectionIds) returns (google.protobuf.Empty);
     rpc seed (PeerId) returns (PeerId);
     rpc await_hole_punch_trigger (PeerId) returns (google.protobuf.Empty);
     rpc init_punch (PeerId) returns (google.protobuf.Empty);
     rpc advertise (FileMessage) returns(ClientId);
     rpc register_client (ClientRegistry) returns (ClientId);
     rpc update_registered_peer_id (FullId) returns (ClientId);
-    rpc init_cert_sender (PeerId) returns (google.protobuf.Empty);
     rpc get_cert (PeerId) returns (Cert);
     rpc send_cert (CertMessage) returns (google.protobuf.Empty);
     rpc get_client_id (PeerId) returns (ClientId);
     rpc get_all_files (google.protobuf.Empty) returns (FileList);
+    rpc delete_file (FileDelete) returns (google.protobuf.Empty);
+    rpc delist_client (ClientId) returns (google.protobuf.Empty);
 }
-
 
 message Cert {
     bytes certificate = 1;
@@ -48,9 +48,24 @@ message FullId {
     PeerId peer_id = 2;
 }
 
+message ConnectionIds {
+    PeerId connection_peer = 1;
+    PeerId self_id = 2;
+}
+
+message FileHash {
+    bytes hash = 1;
+}
+
+message FileDelete {
+    ClientId id = 1;
+    FileHash hash = 2;
+}
+
 message FileMessage {
     ClientId id = 1;
-    InfoHash info_hash = 2;
+    FileHash hash = 2;
+    InfoHash info_hash = 3;
 }
 
 message FileList {
