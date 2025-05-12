@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tauri = "2.5.0"
 serde = { version = "1.0", features = ["derive"] }
 directories-next = "2.0.0"
 local-ip-address = "0.6.3"
@@ -19,6 +18,7 @@ tokio-util = "0.7.15"
 tonic = { version = "0.13.0", features = ["_tls-any", "tls-webpki-roots"] }
 webpki-roots = "0.26.8"
 sha1 = "0.10.6"
+hex = "0.4"
 
 [build-dependencies]
 tonic-build = "0.13.0"

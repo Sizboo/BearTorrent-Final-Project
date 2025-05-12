@@ -2,7 +2,7 @@ use tauri::command;
 use std::time::Duration;
 use tokio::time::sleep;
 use crate::AppState;
-use crate::connection::SerializableFileInfo;
+use client::connection::SerializableFileInfo;
 use tauri::State;
 
 
@@ -13,10 +13,28 @@ pub fn say_hello() -> String {
     "Hello World".to_string()
 }
 
-#[command]
-pub fn download() -> String {
-    println!("Simulated download() called.");
-    "Download simulated successfully".to_string()
+#[tauri::command]
+pub async fn download(hash: String, state: State<'_, AppState>) -> Result<String, String> {
+    let mut client = state.client.write().await;
+
+    let server_files = client
+        .get_server_files()
+        .await
+        .map_err(|e| format!("Failed to get files: {}", e))?;
+
+    if let Some(info_hash) = server_files.into_iter().find(|f| {
+        let computed_hash = client::connection::hash_infohash(f);
+        computed_hash == hash
+    }) {
+        client
+            .file_request(info_hash)
+            .await
+            .map_err(|e| format!("Failed to request file: {}", e))?;
+
+        Ok(format!("Download started for hash: {}", hash))
+    } else {
+        Err(format!("No file matched the given hash: {}", hash))
+    }
 }
 
 

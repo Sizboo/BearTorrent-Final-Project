@@ -4,11 +4,15 @@ import { FiDownload } from "react-icons/fi";
 import {invoke} from "@tauri-apps/api/core";
 
 
-function handleDownload() {
-    invoke("download")
+function handleDownload(selected) {
+    if (!selected?.hash) return;
+    invoke("download", { hash: selected.hash })
         .then(alert)
         .catch(console.error);
 }
+
+
+
 export default function FileDetailSidebar({ selected }) {
     return (
         <aside style={{ position: "fixed", bottom: "24px", right: "24px", width: "360px" }}>
@@ -42,7 +46,7 @@ export default function FileDetailSidebar({ selected }) {
                                     startIcon={<FiDownload />}
                                     sx={{ mt: 3 }}
                                     fullWidth
-                                    onClick={handleDownload}
+                                    onClick={handleDownload(selected)}
                                 >
                                     Download
                                 </Button>

@@ -1,9 +1,10 @@
-use client::demo;
+mod demo;
+use demo::{say_hello, say_hello_delayed, download, get_available_files};
 use tauri::{Manager, Emitter};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::sync::Mutex;
-use client::{TorrentClient, AppState, get_available_files, SerializableFileInfo};
+
+use client::{TorrentClient, AppState, SerializableFileInfo};
 
 
 
@@ -19,8 +20,7 @@ fn main() {
             let client = tauri::async_runtime::block_on(async {
                 TorrentClient::new()
                     .await
-                    .map_err(|e| tauri::Error::Setup(Box::<dyn std::error::Error>::from(e).into()))
-
+                    .map_err(|e| tauri::Error::Setup(Box::<dyn std::error::Error + 'static>::from(e).into()))
 
 
             })?;
@@ -73,12 +73,11 @@ fn main() {
             });
 
             Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            demo::say_hello,
-            demo::download,
-            demo::say_hello_delayed,
-            demo::get_available_files,
+        }).invoke_handler(tauri::generate_handler![
+            say_hello,
+            download,
+            say_hello_delayed,
+            get_available_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

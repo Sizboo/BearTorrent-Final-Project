@@ -1,4 +1,3 @@
-pub mod demo;
 pub mod peer_connection;
 pub mod torrent_client;
 pub mod quic_p2p_sender;
@@ -11,7 +10,6 @@ pub mod message;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 pub use torrent_client::TorrentClient;
-pub use demo::get_available_files;
 pub use crate::connection::SerializableFileInfo;
 
 pub struct AppState {
