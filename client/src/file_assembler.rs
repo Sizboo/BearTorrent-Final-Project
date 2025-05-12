@@ -11,7 +11,7 @@ pub struct FileAssembler {
     ///file hash that is being requested
     file_hash: InfoHash,
     ///notify handle used to tell send_requests to begin requesting
-    start_requesting: Notify,
+    start_requesting: Arc<Notify>,
     ///number of active peer connections achieved
     num_connections: usize,
     ///the sender used for LAN/P2P/QUIC to send data from
@@ -26,7 +26,7 @@ impl FileAssembler {
         let (conn_tx, conn_rx) = mpsc::channel::<Message>(150);
         let assembler = FileAssembler {
             file_hash: file_hash.clone(),
-            start_requesting: Notify::new(),
+            start_requesting: Arc::new(Notify::new()),
             num_connections: num_connection,
             conn_tx,
             request_txs: Vec::new(),
@@ -89,7 +89,8 @@ impl FileAssembler {
         println!("waiting for notify handle");
         
         //wait for connections to have been established to start requesting
-        assembler.read().await.start_requesting.notified().await;
+        let notify_handle = assembler.read().await.start_requesting.clone();
+        notify_handle.notified().await;
 
         //send initial requests
         for i in 0..num_pieces {
