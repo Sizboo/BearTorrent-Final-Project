@@ -217,7 +217,6 @@ impl FileAssembler {
                    //If it was, we want to resend a request for a new piece.
                    if  piece.len() != piece_length as usize {
                        piece.resize(piece_length as usize, 0);
-                       println!("{:?}", piece);
                    }
                    let recvd_piece_hash = hash_piece_data(piece.clone());
                    
@@ -236,6 +235,7 @@ impl FileAssembler {
                    println!("Successfully Wrote: {}", index);
 
                    if file_handler::is_file_complete(info_hash.clone()) {
+                       println!("File complete!");
                        break;
                    }
                },
