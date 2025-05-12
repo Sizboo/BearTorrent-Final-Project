@@ -3,9 +3,9 @@ use crate::connection::connection::turn_packet::Body;
 use crate::turn_server::Turn;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::{sync::{mpsc, RwLock, Barrier}, time::{sleep, Duration}};
+use tokio::{sync::{mpsc, RwLock, Barrier}};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tonic::{async_trait, Request, Response, Status, Streaming, metadata::MetadataMap};
+use tonic::{async_trait, Request, Response, Status, metadata::MetadataMap};
 
 /// role within the turn service session
 #[derive(Clone, Copy, Debug)]
@@ -159,7 +159,7 @@ impl Turn for TurnService {
         // unpack metadata
         let metadata = req.metadata();
         let session_id = extract_header(metadata, "x-session-id")?;
-        let role = if extract_header(metadata, "x-role")? == "seeder" {
+        let _role = if extract_header(metadata, "x-role")? == "seeder" {
             Role::Seeder
         } else {
             Role::Leecher
