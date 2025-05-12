@@ -194,7 +194,7 @@ impl QuicP2PConn {
                         },
                         Err(e) => return match e {
                             quinn::ConnectionError::ApplicationClosed(closed) => {
-                                println!("Connection Closed: {:?}", closed);
+                                println!("Connection Closed: {:?}", closed.reason);
                                 Ok(())
                             },
                             other => {
@@ -279,7 +279,7 @@ impl QuicP2PConn {
                 }
             } else {
                 println!("connection closed");
-                conn.close(0u32.into(), b"closing connection");
+                conn.close(0u32.into(), b"closing connection gracefully");
                 return Ok(())
             }
         }
