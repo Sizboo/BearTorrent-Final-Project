@@ -43,6 +43,19 @@ export default function App() {
         };
     }, []);
 
+    useEffect(() => {
+        const handleRefresh = (e) => {
+            setFiles(e.detail);
+        };
+
+        window.addEventListener('file-refresh', handleRefresh);
+
+        return () => {
+            window.removeEventListener('file-refresh', handleRefresh);
+        };
+    }, []);
+
+
     function refreshFiles() {
         setLoading(true);
         invoke("get_available_files")

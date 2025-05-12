@@ -5,12 +5,17 @@ import { invoke } from '@tauri-apps/api/core';
 export default function ToggleButton() {
     const [isToggled, setIsToggled] = useState(false);
 
-    // Correct use of useEffect
+    //use effect for toggling Seeding
     useEffect(() => {
-        invoke("is_seeding")
-            .then((enabled) => setIsToggled(!!enabled))
-            .catch((err) => console.error("Failed to fetch seeding state:", err));
+        const interval = setInterval(() => {
+            invoke('is_seeding')
+                .then((enabled) => setIsToggled(!!enabled))
+                .catch(console.error);
+        }, 1000);
+
+        return () => clearInterval(interval);
     }, []);
+
 
     const handleToggle = async () => {
         const newState = !isToggled;
