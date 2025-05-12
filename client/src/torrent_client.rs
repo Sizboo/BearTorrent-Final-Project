@@ -190,7 +190,7 @@ impl TorrentClient {
         //we want to maximize connection which means either one connection per piece
         // or one connection per peer, whichever is less.
         let num_connections = min(peer_list.len(), file_hash.pieces.len());
-        let mut assembler =FileAssembler::new(file_hash.clone(), num_connections).await;
+        let assembler =FileAssembler::new(file_hash.clone(), num_connections).await;
 
         let mut connection_handles = Vec::new();
         

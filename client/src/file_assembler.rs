@@ -69,6 +69,7 @@ impl FileAssembler {
     }
 
     pub fn start_requesting(&mut self) {
+        println!("Notifying waiters");
         self.start_requesting.notify_waiters();
     }
 
