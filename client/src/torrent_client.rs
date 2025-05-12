@@ -268,11 +268,13 @@ impl TorrentClient {
         
         Ok(())
     }
-
-    /// announce is a method used update server with connection details
-    /// this will primarily be used by init() and called on a periodic basis
-    /// this is essentially a "keep alive" method
-    pub async fn announce(&self) -> Result<(), Box<dyn std::error::Error>> {
+    
+    pub async fn remove_client(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut server_connection = self.client.clone();
+        
+        server_connection.delist_client(self.uid.clone()).await?;
+        
         Ok(())
     }
+
 }

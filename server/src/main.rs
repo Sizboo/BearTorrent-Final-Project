@@ -337,6 +337,37 @@ impl Connector for ConnectionService {
 
        Ok(Response::new(()))
     }
+    
+    async fn delist_client(
+        &self,
+        request: Request<ClientId>,
+    ) -> Result<Response<()>, Status> {
+        let client_id = request.into_inner();
+        
+        if let Some(client_registry_entry) = self.client_registry.remove(&client_id) {
+            
+            //if peer_id is found anywhere remove it
+            if let Some(peer_id) = client_registry_entry.1 {
+                if self.seed_notifier.contains_key(&peer_id) {
+                    self.seed_notifier.remove(&peer_id);    
+                }
+                if self.cert_sender.contains_key(&peer_id) {
+                    self.cert_sender.remove(&peer_id);
+                }
+                if self.init_hole_punch.contains_key(&peer_id) {
+                    self.init_hole_punch.remove(&peer_id);
+                }
+            }
+            
+            //remove from seeding list
+            self.seeder_list.iter_mut()
+                .for_each(|mut entry| {
+                    entry.value_mut().retain(|id| *id != client_id);
+                });
+        }
+
+        Ok(Response::new(()))
+    }
 }
 
 

@@ -16,6 +16,7 @@ service Connector {
     rpc get_client_id (PeerId) returns (ClientId);
     rpc get_all_files (google.protobuf.Empty) returns (FileList);
     rpc delete_file (FileDelete) returns (google.protobuf.Empty);
+    rpc delist_client (ClientId) returns (google.protobuf.Empty);
 }
 
 message Cert {

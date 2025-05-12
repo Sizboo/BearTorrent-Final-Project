@@ -97,6 +97,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 torrent_client.delete_file(file_requested).await?; 
             }
+            "exit" => {
+                torrent_client.remove_client().await?;
+                println!("Client successfully delisted. Exiting.....");
+                return Ok(());
+            }
             _ => {
                 println!("Unknown command: {}", command);
             }
