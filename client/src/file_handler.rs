@@ -65,7 +65,7 @@ impl connection::InfoHash {
                 // Size of the pieces
                 let piece_length = Self::get_piece_length(file_length);
                 // Vector of piece hashes
-                let pieces = Self::get_piece_hashes(path, piece_length as usize, file_length as usize)?;
+                let pieces = Self::get_piece_hashes(path, piece_length as usize)?;
                 
                 // Create the new cache file to improve load time
                 let mut file = OpenOptions::new().write(true).open(file_cache)?;
