@@ -249,8 +249,13 @@ impl QuicP2PConn {
     /// 
     /// parameter: 
     ///     - peer_addr: the is the address of the peer to connect to
-    ///     - conn_tx: this is the receiving end of the file assembler channel from which to get requests from
-    ///     - conn_rx: 
+    ///     - conn_rx: this is the receiving end of the file assembler channel from which to get requests from
+    ///     - conn_tx: this is the sending end of the file assembler channel from which to send responses
+    /// 
+    /// function:
+    /// This method tries to connect to the peer quic server. If it succeeds, it spins off the recv_data task
+    /// which sends file piece requests. It will timeout and return a failure in 4 seconds if it does not
+    /// succeed in making a connection. 
     pub(crate) async fn connect_to_peer_server(
         &mut self,
         peer_addr: SocketAddr,
@@ -281,6 +286,16 @@ impl QuicP2PConn {
         
     }
     
+    ///recv_data
+    /// 
+    /// parameters:
+    ///    - conn_tx: the sending end of channel to send peer responses to reassembly_loop
+    ///    - conn_rx: the receiving end of the channel to receive requests from request sender.
+    /// 
+    /// function:
+    /// This method loops through all the requests delegated to it by the receiver. It sends those
+    /// to the peer and passes the response back up to the requester. If the connection fails,
+    /// it loops back all the responses as a cancel request so they may be re-requested by another peer.
     async fn recv_data(
         conn: Connection,
         conn_tx: Sender<Message>,

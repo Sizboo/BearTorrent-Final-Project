@@ -23,6 +23,11 @@ pub struct PeerConnection {
 
 impl PeerConnection {
 
+    ///Hole punch initiates the hole punching procedure. 
+    /// It concurrently sends udp packets while listening to receive a packet
+    /// containing string HELPFUL_SERF. Upon receipt of this String it returns the 
+    /// socket used to hole punch so it can be consumed into a stable quic connection.
+    /// If it fails to receive that string in 5 seconds, it times out and returns an error.
     async fn hole_punch(&mut self, peer_addr: SocketAddr ) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
 
         //todo maybe don't take this here
@@ -103,6 +108,10 @@ impl PeerConnection {
     }
 
 
+    ///This goes through the connection process for a seeder. 
+    /// It follows the ICE order of priorities, first attempting to make 
+    /// a connection over LAN if possible, then attempting hole-punching, and then
+    /// falling back on our TURN server if all other methods fail.
     pub async fn seeder_connection(&mut self, res: Response<PeerId>) -> Result<(), Box<dyn std::error::Error>> {
 
         let mut server_connection = self.server.client.clone();
@@ -204,7 +213,9 @@ impl PeerConnection {
 
 
 
-    ///Used when client is requesting a file
+    ///This goes through the connection process for a leecher (requester)
+    /// It also follows the ICE priority order, starting with LAN,
+    /// then too hole punching across NATs and falling back on TURN
     pub async fn requester_connection(&mut self, peer_id: PeerId, conn_tx: mpsc::Sender<Message>, request_rx:  mpsc::Receiver<Message> ) -> Result<(), Box<dyn std::error::Error>> {
         
         //init the map so cert can be retrieved
