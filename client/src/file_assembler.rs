@@ -15,7 +15,7 @@ pub struct FileAssembler {
     ///number of active peer connections achieved
     num_connections: usize,
     ///the sender used for LAN/P2P/QUIC to send data from
-    conn_tx: mpsc::Sender<Message>, 
+    conn_tx: mpsc::Sender<Message>,
     /// sender used to send file requests across a connection
     request_txs: Vec<mpsc::Sender<Message>>,
 }
@@ -31,13 +31,13 @@ impl FileAssembler {
             conn_tx,
             request_txs: Vec::new(),
         };
-        
+
         let (resend_tx, resend_rx) = mpsc::channel::<Message>(10);
-        
+
         // let request_txs = assembler.request_txs.clone();
-        
+
         let assembler = Arc::new(RwLock::new(assembler));
-       
+
         let assembler_clone = assembler.clone();
         tokio::spawn(async move {
             let res = FileAssembler::reassemble_loop(conn_rx, assembler_clone, resend_tx).await;
@@ -45,7 +45,7 @@ impl FileAssembler {
                 eprintln!("Reassembly Loop Error: {:?}", res);
             }
         });
-        
+
         let assembler_clone = assembler.clone();
         tokio::spawn(async move {
             let res = FileAssembler::send_requests(assembler_clone, resend_rx).await;
@@ -67,16 +67,16 @@ impl FileAssembler {
 
         request_rx
     }
-    
+
     pub fn start_requesting(&mut self) {
-        self.start_requesting.notify_waiters();    
+        self.start_requesting.notify_waiters();
     }
-    
+
     async fn send_requests(
         assembler: Arc<RwLock<FileAssembler>>,
         mut resend_rx: mpsc::Receiver<Message>, //used to resend requests for pieces that didn't come or are incorrect
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-       
+
         //get necessary fields in an efficient manner
         let assembler_lock = assembler.read().await;
         let hash = assembler_lock.file_hash.get_hashed_info_hash();
@@ -84,10 +84,12 @@ impl FileAssembler {
         let num_connections = assembler_lock.num_connections;
         let piece_length = assembler_lock.file_hash.piece_length;
         drop(assembler_lock);
-       
+
+        println!("waiting for notify handle");
+        
         //wait for connections to have been established to start requesting
         assembler.read().await.start_requesting.notified().await;
-        
+
         //send initial requests
         for i in 0..num_pieces {
 
@@ -98,37 +100,37 @@ impl FileAssembler {
                 length: piece_length,
                 hash,
             };
-            
+
             println!("Sending piece request {}", i);
             assembler.read().await.request_txs.get(i % num_connections)
                 .ok_or(Box::<dyn std::error::Error + Send + Sync>::from("Could not retrieve connection rx"))?
                 .send(request).await?;
 
         }
-        
+
         let mut i = 0;
         loop {
             if let Some(msg) = resend_rx.recv().await {
-                
+
                 println!("Sending request {:?}", msg);
-                
+
                 let new_seeder = (i % assembler.read().await.num_connections) as u32;
-                
+
                 //make a new request message with the new seeder
                 let msg = match msg {
-                    Message::Cancel {index, begin, length, .. } => 
+                    Message::Cancel {index, begin, length, .. } =>
                         Message::Request {seeder: new_seeder, index, begin, length, hash},
                     Message::Request { index, begin, length, hash, ..} =>
                         Message::Request {seeder: new_seeder, index, begin, length, hash},
                     _ => continue,
                 };
-                
+
                 assembler.read().await.request_txs.get(new_seeder as usize)
                     .ok_or(Box::<dyn std::error::Error + Send + Sync>::from("Could not retrieve connection rx"))?
                     .send(msg).await?;
-                
+
                 i += 1;
-                
+
             } else {
                 println!("Sending Loop finishing!");
                 return Ok(())
@@ -136,16 +138,16 @@ impl FileAssembler {
         }
     }
     
-     
+
     async fn reassemble_loop(
         mut conn_rx: mpsc::Receiver<Message>, //used to receive messages back from connection
         assembler: Arc<RwLock<FileAssembler>>,
         resend_tx: mpsc::Sender<Message>, //used to send resend requests to send_requests loop
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        
-        let info_hash = assembler.read().await.file_hash.clone(); 
-        
-        
+
+        let info_hash = assembler.read().await.file_hash.clone();
+
+
         loop {
            let msg = conn_rx.recv().await.ok_or("failed to get message")?;
            
@@ -157,27 +159,27 @@ impl FileAssembler {
 
                    if file_handler::is_file_complete(info_hash.clone()) {
                        break;
-                   } 
+                   }
                },
                Message::Cancel {seeder,index, begin, length} => {
                    println!("Failed to get piece removing seeder and trying again");
-                   
+
                    //if we get a cancel notification, we are going to assume this means the seeder
                    //does not or cannot provide the data. So we will remove it from seeder list
                    //and resend a request.
-                   
+
                    assembler.write().await.request_txs.remove(seeder as usize);
                    assembler.write().await.num_connections -= 1;
-                   
+
                    resend_tx.send(Message::Cancel {seeder, index, begin, length}).await?;
-                   
+
                },
                _ => Err(Box::<dyn std::error::Error + Send + Sync>::from("wrong message type"))?,
            };
 
-           
+
         }
-       
+
         //drop all senders signaling end of connection
         for request_tx in assembler.write().await.request_txs.drain(0..) {
             drop(request_tx);
