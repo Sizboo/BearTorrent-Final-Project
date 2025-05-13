@@ -41,11 +41,23 @@ The core of your project should, ideally, be written in Rust. Depending on the p
 
 # Submission
 
+## Notes
+- Due to the nature of how our server implements multiple connections, sometimes it needs to be redployed to clean seeder lists. If errors occur, you can contact us for redploy.
+- Due to issues with installing Tauri, we did not have the chance to fully implement our "app" with our TorrentClient. We have a mock REPL implementation that can be used for some testing. 
+  - "s" starts seeding
+  - "r" requests files and lists all files seeded on the server
+    - numerical selection allows you to request download of that file
+  - "d" allows you to delete files stored locally from your device and from server list
+  - "exit" performs a graceful exit removing your client from the server's peer lists. (If this is bypassed or connection methods skipped, the server will need a restart)
+- to seed a file, place it in your ./client/resources/files directory and upon startup and seeding the file will be hashed and advertised. 
+- **to bypass forntend insall:** checkout git branch "sendFilePiece" and follow setup isntructions below for compilation
+- Our TorrentClient has more functionality than we hooked up or demoed that can be seen in the TorrentClient file. With detailed underlying implementation and function documentation.
+
 ## Setup Instructions
 - Use rust version 1.86.0 (what we used)
 - Make sure protoc (Protocol Buffers compiler) is installed. We used this to generate proto files for use with gRPC via Tonic.
 	- Run a command such as '''sudo pacman -S protobuf''' (or whatever package manager you use.)
- - 
+
 ## FRONTEND 
 Install Tauri Into Client/
 Npm run build inside Client/frontend
